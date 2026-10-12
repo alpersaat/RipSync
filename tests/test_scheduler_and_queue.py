@@ -338,8 +338,9 @@ class TestSchedulerAndQueueUI(unittest.TestCase):
         self.assertEqual(dlg.spin_concurrent.value(), self.qm.max_concurrent)
 
         # Add mock queued downloads to test table
-        d1 = self.db.add_download("http://example.com/a.zip", "a.zip", "C:/Downloads")
-        d2 = self.db.add_download("http://example.com/b.zip", "b.zip", "C:/Downloads")
+        tmp_dir = tempfile.gettempdir()
+        d1 = self.db.add_download("http://example.com/a.zip", "a.zip", tmp_dir)
+        d2 = self.db.add_download("http://example.com/b.zip", "b.zip", tmp_dir)
         dlg._refresh_queued_table()
         self.assertEqual(dlg.table_queued.rowCount(), 2)
 

@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -58,10 +58,13 @@ jobs:
       - name: Determine Release Tag
         id: vars
         shell: powershell
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = "$env:REF_NAME"
           if (-not $tag -or $tag -eq "main" -or $tag -eq "master") {
-            $tag = "${{ github.event.inputs.tag_name }}"
+            $tag = "$env:INPUT_TAG"
           }
           if (-not $tag) {
             $tag = "v1.0.0"
@@ -69,7 +72,7 @@ jobs:
           echo "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release and Upload Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c062e49c3b88523c93da681817be05fec42a0b4d # v2.0.12
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: RipSync ${{ steps.vars.outputs.tag }}
