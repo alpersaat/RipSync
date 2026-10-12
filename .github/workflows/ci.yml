@@ -28,5 +28,5 @@ jobs:
 
       - name: Run Test Suite
         run: |
-          python -m pytest test_*.py -v
+          python -m pytest tests/ -v
 

@@ -121,17 +121,17 @@ pip install -r requirements-dev.txt
 ```bash
 python main.py
 ```
-veya çift tıklayarak:
+veya Windows'ta çift tıklayarak:
 ```cmd
-run.bat
+scripts\run.bat
 ```
 
 ### 3. Kendi Kurulum (.exe) ve Taşınabilir (.zip) Paketini Derleme
 Sisteminizde [Inno Setup 6](https://jrsoftware.org/isinfo.php) kurulu olduğundan emin olduktan sonra:
 ```bash
 python build_exe.py
-# veya
-build.bat
+# veya Windows'ta çift tıklayarak:
+scripts\build.bat
 ```
 Derleme tamamlandığında `dist/` klasöründe:
 - `dist/RipSync-Setup.exe`

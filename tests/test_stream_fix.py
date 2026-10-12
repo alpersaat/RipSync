@@ -3,12 +3,17 @@ import sys
 import tempfile
 import time
 
-# Ensure current dir is in python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ensure project root is in python path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.stream_downloader import StreamDownloader, is_stream_url
 
-def test_video_download(url: str, label: str, quality: str = "max"):
+def test_stream_url_detection():
+    assert is_stream_url("https://www.youtube.com/watch?v=0rW7Fbm4S7g")
+    assert is_stream_url("https://x.com/user/status/123456")
+    assert not is_stream_url("https://example.com/file.zip")
+
+def run_video_download(url: str, label: str, quality: str = "max"):
     print(f"\n==========================================")
     print(f"Testing {label} (Quality: {quality}) -> {url}")
     print(f"==========================================")
@@ -60,13 +65,13 @@ def test_video_download(url: str, label: str, quality: str = "max"):
 
 def main():
     # 1. Test X.com (Twitter) Video
-    test_video_download(
+    run_video_download(
         url="https://x.com/MrBarneyStynson/status/2109023665203417588",
         label="X.com (Twitter)"
     )
 
     # 2. Test YouTube Video (720p HD Quality)
-    test_video_download(
+    run_video_download(
         url="https://www.youtube.com/watch?v=0rW7Fbm4S7g",
         label="YouTube (720p)",
         quality="720p"

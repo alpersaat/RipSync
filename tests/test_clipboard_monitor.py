@@ -1,6 +1,9 @@
 import sys
-import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 from PyQt6.QtWidgets import QApplication
 from ui.clipboard_monitor import ClipboardMonitor
 from ui.clipboard_popup import ClipboardNotificationPopup
@@ -34,7 +37,7 @@ def test_clipboard_detection():
     print("\nAll URL analyzer tests passed!")
 
 def test_qt_popup_ui():
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     popup = ClipboardNotificationPopup()
     
     # Test show_for_url
@@ -49,6 +52,7 @@ def test_qt_popup_ui():
     popup.btn_quick_download.click()
     assert len(signals_received) == 1
     assert signals_received[0] == ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", True)
+    popup.close()
     print("PASS: Quick Download signal emitted successfully.")
 
 if __name__ == "__main__":

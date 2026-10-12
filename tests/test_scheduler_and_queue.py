@@ -6,8 +6,8 @@ import time
 from datetime import datetime, date, time as dtime, timedelta
 from unittest.mock import MagicMock
 
-# Ensure current directory is in sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.database import Database
 from core.scheduler import DownloadScheduler, parse_time_str

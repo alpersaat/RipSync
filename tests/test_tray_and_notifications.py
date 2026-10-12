@@ -4,8 +4,8 @@ import unittest
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QCloseEvent
 
-# Ensure current dir is in sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.database import Database
 from core.queue_manager import QueueManager

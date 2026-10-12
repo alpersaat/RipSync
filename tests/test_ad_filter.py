@@ -15,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from playwright.sync_api import sync_playwright
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXT_DIR = os.path.join(ROOT, "extension")
 PORT = 29915
 

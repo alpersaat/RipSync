@@ -6,8 +6,8 @@ import tempfile
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Add current dir to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.downloader import MultiThreadDownloader
 from core.database import Database

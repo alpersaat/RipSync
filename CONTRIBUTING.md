@@ -31,7 +31,7 @@ python main.py
 
 ### 4. Testleri Çalıştırın
 ```bash
-pytest test_*.py -v
+pytest tests/ -v
 ```
 
 ---
@@ -44,8 +44,8 @@ Kurulum paketi (`RipSync-Setup.exe`) ve taşınabilir zip (`RipSync-Portable.zip
 2. Komut satırında çalıştırın:
 ```bash
 python build_exe.py
-# veya
-build.bat
+# veya Windows'ta çift tıklayarak:
+scripts\build.bat
 ```
 Çıktılar `dist/` klasöründe oluşacaktır:
 - `dist/RipSync-Setup.exe` (Windows Kurulum Sihirbazı)
