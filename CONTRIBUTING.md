@@ -8,7 +8,7 @@ RipSync'e katkıda bulunmak istediğiniz için teşekkürler! RipSync, açık ka
 
 ### 1. Depoyu Klonlayın
 ```bash
-git clone https://github.com/<KULLANICI_ADINIZ>/RipSync.git
+git clone https://github.com/alpersaat/RipSync.git
 cd RipSync
 ```
 
@@ -60,3 +60,4 @@ build.bat
 3. Temiz ve anlaşılır commit mesajları ile commit'leyin (`git commit -m "feat: yeni özellik eklendi"`).
 4. Branch'inizi push edin (`git push origin feature/harika-ozellik`).
 5. GitHub üzerinden bir Pull Request (PR) açın.
+

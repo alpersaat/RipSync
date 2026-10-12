@@ -1,6 +1,6 @@
 # ⚡ RipSync - Modern Internet Download Manager (IDM) Alternatifi
 
-[![GitHub Release](https://img.shields.io/github/v/release/OWNER/RipSync?style=flat-square&color=blue)](../../releases)
+[![GitHub Release](https://img.shields.io/github/v/release/alpersaat/RipSync?style=flat-square&color=blue)](https://github.com/alpersaat/RipSync/releases)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue?style=flat-square&logo=windows)](../../releases)
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12-brightgreen?style=flat-square&logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
@@ -106,7 +106,7 @@ Eğer projeyi kaynak kodundan çalıştırmak veya geliştirmek isterseniz:
 
 ### 1. Depoyu Klonlama & Bağımlılıklar
 ```bash
-git clone https://github.com/OWNER/RipSync.git
+git clone https://github.com/alpersaat/RipSync.git
 cd RipSync
 
 # Sanal ortam oluşturma ve etkinleştirme

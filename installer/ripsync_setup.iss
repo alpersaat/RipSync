@@ -4,7 +4,7 @@
 #define MyAppName "RipSync"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "RipSync"
-#define MyAppURL "https://github.com/RipSync"
+#define MyAppURL "https://github.com/alpersaat/RipSync"
 #define MyAppExeName "RipSync.exe"
 
 [Setup]

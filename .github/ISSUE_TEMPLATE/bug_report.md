@@ -24,3 +24,4 @@ Varsa ekran görüntüsü veya konsol çıktısı ekleyin.
 - İşletim Sistemi: Windows 10 / Windows 11
 - RipSync Versiyonu: (ör. v1.0.0)
 - Tarayıcı: Chrome / Edge / Brave
+

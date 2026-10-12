@@ -17,3 +17,4 @@ Nasıl çalışmasını veya görünmesini istersiniz?
 
 **Ek Bilgiler:**
 Varsa referans bağlantılar veya örnekler.
+
