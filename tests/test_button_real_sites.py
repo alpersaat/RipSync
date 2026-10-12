@@ -3,7 +3,10 @@
 usage:  python test_button_real_sites.py [WIDTHxHEIGHT]
 """
 import os, re, sys, tempfile, time
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
 
 EXT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extension")
 

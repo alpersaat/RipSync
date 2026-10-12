@@ -13,7 +13,10 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXT_DIR = os.path.join(ROOT, "extension")
