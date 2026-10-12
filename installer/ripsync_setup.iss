@@ -2,7 +2,7 @@
 ; RipSync - Modern Internet Download Manager Installer
 
 #define MyAppName "RipSync"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "RipSync"
 #define MyAppURL "https://github.com/alpersaat/RipSync"
 #define MyAppExeName "RipSync.exe"
