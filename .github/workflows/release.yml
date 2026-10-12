@@ -72,7 +72,7 @@ jobs:
           echo "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release and Upload Assets
-        uses: softprops/action-gh-release@c062e49c3b88523c93da681817be05fec42a0b4d # v2.0.12
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.2.1
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: RipSync ${{ steps.vars.outputs.tag }}
