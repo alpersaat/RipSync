@@ -1,0 +1,60 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+eggs/
+.eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+*.egg
+*.manifest
+*.spec.bak
+
+# PyInstaller temporary files
+# Note: ripsync.spec is committed to git, but PyInstaller generated logs/temp files are ignored
+*.log
+
+# Unit test / coverage / analysis reports
+.pytest_cache/
+.coverage
+htmlcov/
+semgrep-rapor.json
+*.report.json
+
+# Local database & user data files (NEVER commit local download history)
+downloads.db
+downloads.db-journal
+downloads.db-wal
+*.db
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE & Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

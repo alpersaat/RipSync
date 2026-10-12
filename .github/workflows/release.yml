@@ -1,0 +1,85 @@
+name: Build and Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Setup & Portable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --no-progress -y
+          echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements-dev.txt
+
+      - name: Build Executable & Inno Setup Installer
+        env:
+          CI: "true"
+        run: |
+          python build_exe.py --require-installer
+
+      - name: Generate SHA256 Checksums
+        shell: powershell
+        run: |
+          cd dist
+          Get-FileHash -Algorithm SHA256 RipSync-Setup.exe | ForEach-Object { "$($_.Hash)  RipSync-Setup.exe" } | Out-File -Encoding utf8 RipSync-Setup.exe.sha256
+          Get-FileHash -Algorithm SHA256 RipSync-Portable.zip | ForEach-Object { "$($_.Hash)  RipSync-Portable.zip" } | Out-File -Encoding utf8 RipSync-Portable.zip.sha256
+          Get-Content RipSync-Setup.exe.sha256
+          Get-Content RipSync-Portable.zip.sha256
+
+      - name: Determine Release Tag
+        id: vars
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag -or $tag -eq "main" -or $tag -eq "master") {
+            $tag = "${{ github.event.inputs.tag_name }}"
+          }
+          if (-not $tag) {
+            $tag = "v1.0.0"
+          }
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: RipSync ${{ steps.vars.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/RipSync-Setup.exe
+            dist/RipSync-Portable.zip
+            dist/RipSync-Setup.exe.sha256
+            dist/RipSync-Portable.zip.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

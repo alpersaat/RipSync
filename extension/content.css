@@ -1,0 +1,170 @@
+.ripsync-sniffer-btn {
+  /* Body-level fixed button: JS sets left/top so it sits OUTSIDE the video,
+     at its top-right corner. Hidden until positioned / while fullscreen. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  white-space: nowrap;
+  background: rgba(26, 27, 38, 0.95);
+  color: #c0caf5;
+  border: 1px solid #7aa2f7;
+  border-radius: 6px;
+  padding: 0 9px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: background 0.2s ease-in-out, color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  opacity: 0.9;
+  user-select: none;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ripsync-sniffer-btn.ripsync-on {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.ripsync-sniffer-btn:hover {
+  opacity: 1;
+  background: #3d59a1;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(61, 89, 161, 0.5);
+}
+
+.ripsync-sniffer-btn.loading {
+  background: #24283b;
+  border-color: #e0af68;
+  color: #e0af68;
+  cursor: wait;
+}
+
+.ripsync-icon {
+  font-size: 12px;
+}
+
+.ripsync-arrow {
+  font-size: 8px;
+  margin-left: 2px;
+  opacity: 0.8;
+  transition: transform 0.2s ease;
+}
+
+.ripsync-sniffer-btn:hover .ripsync-arrow,
+.ripsync-sniffer-btn.open .ripsync-arrow {
+  transform: rotate(180deg);
+}
+
+.ripsync-dismiss-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 50%;
+  color: #7aa2f7;
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 0.2s, background 0.2s, color 0.2s;
+}
+
+.ripsync-dismiss-btn:hover {
+  opacity: 1;
+  background: rgba(247, 118, 142, 0.3);
+  color: #f7768e;
+}
+
+
+/* IDM-Style Dropdown Menu */
+.ripsync-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 215px;
+  background: #1f2335;
+  border: 1px solid #7aa2f7;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+  z-index: 2147483647;
+  pointer-events: auto;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+}
+
+.ripsync-sniffer-btn:hover .ripsync-dropdown-menu,
+.ripsync-dropdown-menu.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.ripsync-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  color: #c0caf5;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ripsync-menu-item:hover {
+  background: #3d59a1;
+  color: #ffffff;
+}
+
+.ripsync-menu-item-icon {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+}
+
+.ripsync-menu-item-text {
+  flex: 1;
+  text-align: left;
+}
+
+.ripsync-menu-item-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  background: rgba(122, 162, 247, 0.2);
+  color: #7aa2f7;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.ripsync-menu-item:hover .ripsync-menu-item-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.ripsync-menu-divider {
+  height: 1px;
+  background: rgba(122, 162, 247, 0.2);
+  margin: 3px 4px;
+}
