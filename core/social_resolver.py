@@ -29,6 +29,13 @@ def is_instagram_url(url: str) -> bool:
     u_lower = url.lower()
     return "instagram.com" in u_lower or "instagr.am" in u_lower
 
+def is_twitter_url(url: str) -> bool:
+    """Check if URL belongs to Twitter / X post or video."""
+    u_lower = url.lower()
+    if any(domain in u_lower for domain in ("twitter.com", "x.com", "t.co")):
+        return "/status/" in u_lower or "/i/status/" in u_lower
+    return False
+
 def sanitize_title(title: str) -> str:
     """Clean title of invalid characters and emojis for filesystem safety."""
     if not title:
@@ -192,6 +199,50 @@ class SocialResolver:
             logger.warning(f"yt-dlp Instagram extraction failed: {e}")
 
         return None
+
+    @classmethod
+    def resolve_twitter(cls, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract direct MP4 video from Twitter / X tweet.
+        Uses yt-dlp format selection to pick the highest resolution MP4 stream.
+        """
+        try:
+            import yt_dlp
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "http_headers": {"User-Agent": DEFAULT_UA},
+                "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info:
+                    chosen_url = None
+                    if "requested_formats" in info:
+                        for rf in info["requested_formats"]:
+                            if rf.get("vcodec") != "none":
+                                chosen_url = rf.get("url")
+                                break
+                    if not chosen_url:
+                        chosen_url = info.get("url")
+
+                    if chosen_url:
+                        raw_title = info.get("title") or info.get("description") or "Twitter_Video"
+                        return {
+                            "title": sanitize_title(raw_title),
+                            "video_url": chosen_url,
+                            "thumbnail": info.get("thumbnail"),
+                            "duration": info.get("duration", 0),
+                            "is_watermark_free": True,
+                            "platform": "Twitter/X",
+                            "source": "yt-dlp"
+                        }
+        except Exception as e:
+            logger.warning(f"yt-dlp Twitter/X extraction failed for {url}: {e}")
+
+        return None
+
 
     @classmethod
     def _inject_cookies(cls, cookiejar, cookie_str: str, domain: str):

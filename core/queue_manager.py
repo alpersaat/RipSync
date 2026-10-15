@@ -1,11 +1,23 @@
 import os
 import threading
 import json
+from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
-from core.database import Database, detect_category, get_categorized_save_dir
+from core.database import Database
+from core.categories import detect_category, get_categorized_save_dir
 from core.downloader import MultiThreadDownloader
 from core.stream_downloader import StreamDownloader, is_stream_url
+from core.paths import resolve_file_conflict, sanitize_filename
+from core.post_download import execute_post_download
 from core.scheduler import DownloadScheduler
+from core.power_manager import set_keep_awake
+from core.metered_connection import is_metered_connection
+
+PRIORITY_WEIGHTS = {
+    "high": 3.0,
+    "normal": 1.0,
+    "low": 0.33
+}
 
 class QueueManager:
     def __init__(self, db: Database, max_concurrent: int = 2, global_speed_limit_bps: int = 0):
@@ -14,8 +26,10 @@ class QueueManager:
         self.global_speed_limit_bps = global_speed_limit_bps
 
         self.active_downloaders: Dict[str, MultiThreadDownloader] = {}
+        self.custom_speed_limits: Dict[str, int] = {}  # Per-task manual overrides
         self.lock = threading.Lock()
         self.scheduler: Optional[DownloadScheduler] = None
+        self.metered_bypass = False
 
         # Callbacks for UI updates
         self.on_task_progress: Optional[Callable[[str, int, int, float, int], None]] = None
@@ -24,6 +38,12 @@ class QueueManager:
         self.on_task_added: Optional[Callable[[Dict[str, Any]], None]] = None
         self.on_queue_empty: Optional[Callable[[], None]] = None
         self.on_scheduler_power_action: Optional[Callable[[str], None]] = None
+        self.on_metered_blocked: Optional[Callable[[str], None]] = None
+
+    def set_metered_bypass(self, bypass: bool):
+        self.metered_bypass = bypass
+        if bypass:
+            self._check_queue()
 
     def set_max_concurrent(self, val: int):
         with self.lock:
@@ -34,14 +54,78 @@ class QueueManager:
     def set_global_speed_limit(self, bps: int):
         with self.lock:
             self.global_speed_limit_bps = max(0, bps)
-            for downloader in self.active_downloaders.values():
-                downloader.set_speed_limit(self.global_speed_limit_bps)
+            if self.global_speed_limit_bps == 0:
+                self.custom_speed_limits.clear()
+                for d in self.active_downloaders.values():
+                    d.set_speed_limit(0)
+                return
+        self.recalculate_bandwidth_allocation()
+
+    def _update_keep_awake(self):
+        """Prevents system sleep when there are active downloads and setting is enabled."""
+        try:
+            enabled = bool(self.db.get_setting("keep_awake_enabled", True))
+            if not enabled:
+                set_keep_awake(False)
+                return
+
+            with self.lock:
+                has_active = any(d.status in ("Downloading", "Probing", "Retrying") for d in self.active_downloaders.values())
+            set_keep_awake(has_active)
+        except Exception as e:
+            print(f"[QueueManager] Keep awake update failed: {e}")
+
+    def recalculate_bandwidth_allocation(self):
+        """
+        Dynamically distributes global bandwidth among active downloads according to their priority weights:
+        High (3.0x), Normal (1.0x), Low (0.33x).
+        """
+        with self.lock:
+            active_dls = [d for d in self.active_downloaders.values() if d.status in ("Downloading", "Probing", "Retrying")]
+            if not active_dls:
+                return
+
+            if self.global_speed_limit_bps <= 0:
+                # Unlimited global limit
+                for d in active_dls:
+                    d.set_speed_limit(0)
+                return
+
+            # Compute priority weights
+            weights: Dict[str, float] = {}
+            for d in active_dls:
+                rec = self.db.get_download(d.download_id)
+                prio = (rec.get("priority") or "normal").lower() if rec else "normal"
+                weights[d.download_id] = PRIORITY_WEIGHTS.get(prio, 1.0)
+
+            total_weight = sum(weights.values()) or 1.0
+            for d in active_dls:
+                # If user set a specific custom limit lower than allocated, keep manual override
+                custom = self.custom_speed_limits.get(d.download_id, 0)
+                if custom > 0:
+                    d.set_speed_limit(custom)
+                else:
+                    w = weights.get(d.download_id, 1.0)
+                    allocated = max(32 * 1024, int(self.global_speed_limit_bps * (w / total_weight)))
+                    d.set_speed_limit(allocated)
+
+    def set_download_priority(self, download_id: str, priority: str):
+        """Sets download priority ('high', 'normal', 'low') and recalculates bandwidth allocation."""
+        if priority not in ("high", "normal", "low"):
+            priority = "normal"
+        self.db.update_download(download_id, priority=priority)
+        self.recalculate_bandwidth_allocation()
 
     def set_download_speed_limit(self, download_id: str, bps: int):
         with self.lock:
+            if bps > 0:
+                self.custom_speed_limits[download_id] = bps
+            else:
+                self.custom_speed_limits.pop(download_id, None)
             dl = self.active_downloaders.get(download_id)
             if dl:
                 dl.set_speed_limit(bps)
+        self.recalculate_bandwidth_allocation()
 
     def get_active_count(self) -> int:
         with self.lock:
@@ -50,7 +134,12 @@ class QueueManager:
     def add_download(self, url: str, save_dir: str, filename: str = "",
                      connections: int = 8, quality: str = "max",
                      headers: Optional[Dict[str, str]] = None,
-                     start_now: bool = True) -> str:
+                     start_now: bool = True,
+                     auto_open: bool = False,
+                     auto_extract: bool = False,
+                     priority: str = "normal",
+                     tags: str = "",
+                     queue_id: str = "default") -> str:
         # Check auto categorization setting
         auto_cat = bool(self.db.get_setting("auto_categorize", True))
         effective_dir = save_dir
@@ -62,17 +151,28 @@ class QueueManager:
             if not effective_dir or os.path.abspath(effective_dir) == os.path.abspath(default_dir):
                 effective_dir = get_categorized_save_dir(filename, default_dir)
 
+        # File conflict resolution
+        conflict_action = self.db.get_conflict_setting()
+        effective_filename = filename or "download"
+        if filename:
+            effective_filename, was_conflicted = resolve_file_conflict(effective_dir, filename, action=conflict_action)
+
         # Register in database with headers and quality
         stored_headers = dict(headers or {})
         stored_headers["quality"] = quality
 
         download_id = self.db.add_download(
             url=url,
-            filename=filename or "download",
-            save_path=os.path.join(effective_dir, filename or "download"),
+            filename=effective_filename,
+            save_path=os.path.join(effective_dir, effective_filename),
             connections=connections,
             category=cat if filename else None,
-            headers=stored_headers
+            headers=stored_headers,
+            auto_open=auto_open,
+            auto_extract=auto_extract,
+            priority=priority,
+            tags=tags,
+            queue_id=queue_id or "default"
         )
 
         record = self.db.get_download(download_id)
@@ -83,7 +183,7 @@ class QueueManager:
             # Sequential Queue check: only start immediately if active count < max_concurrent
             active_count = self.get_active_count()
             if active_count < self.max_concurrent:
-                self.start_download(download_id, effective_dir, filename, connections, stored_headers, quality=quality, force=True)
+                self.start_download(download_id, effective_dir, effective_filename, connections, stored_headers, quality=quality, force=True)
             else:
                 self.db.update_download(download_id, status="Queued")
                 if self.on_task_status:
@@ -100,6 +200,17 @@ class QueueManager:
                        headers: Optional[Dict[str, str]] = None, quality: Optional[str] = None,
                        force: bool = False):
         with self.lock:
+            # Check metered connection restriction
+            metered_cfg = self.db.get_metered_settings()
+            if metered_cfg.get("pause_on_metered", True) and not self.metered_bypass:
+                if is_metered_connection():
+                    self.db.update_download(download_id, status="Paused", error_message="Tarifeli bağlantı (Kota Koruması Aktif)")
+                    if self.on_task_status:
+                        self.on_task_status(download_id, "Paused", "Tarifeli bağlantı (Kota Koruması Aktif)")
+                    if self.on_metered_blocked:
+                        self.on_metered_blocked(download_id)
+                    return
+
             active_count = len([d for d in self.active_downloaders.values() if d.status in ("Downloading", "Probing")])
             if not force and active_count >= self.max_concurrent:
                 # Do not exceed concurrent limit; mark Queued
@@ -132,7 +243,14 @@ class QueueManager:
             sel_quality = quality or req_headers.get("quality") or self.db.get_setting("preferred_quality", "max")
 
             target_url = record["url"]
+            proxy_url = self.db.get_proxy_url()
+
             if is_stream_url(target_url):
+                browser_cookies = req_headers.get("browser_cookies") or self.db.get_setting("browser_cookies", "")
+                download_subtitles = bool(req_headers.get("download_subtitles", self.db.get_setting("download_subtitles", False)))
+                download_thumbnail = bool(req_headers.get("download_thumbnail", self.db.get_setting("download_thumbnail", False)))
+                embed_metadata = bool(req_headers.get("embed_metadata", self.db.get_setting("embed_metadata", True)))
+
                 downloader = StreamDownloader(
                     download_id=download_id,
                     url=target_url,
@@ -142,11 +260,18 @@ class QueueManager:
                     quality=sel_quality,
                     headers=req_headers,
                     speed_limit_bps=self.global_speed_limit_bps,
+                    proxy=proxy_url,
+                    browser_cookies=browser_cookies if browser_cookies else None,
+                    download_subtitles=download_subtitles,
+                    download_thumbnail=download_thumbnail,
+                    embed_metadata=embed_metadata,
                     on_progress=lambda d, t, s, e: self._on_progress(download_id, d, t, s, e),
                     on_segments_update=lambda segs: self._on_segments(download_id, segs),
                     on_status_change=lambda st, err: self._on_status(download_id, st, err)
                 )
             else:
+                auto_retry_en = bool(self.db.get_setting("auto_retry_enabled", True))
+                retries_cnt = int(self.db.get_setting("max_retries", 3))
                 downloader = MultiThreadDownloader(
                     download_id=download_id,
                     url=target_url,
@@ -155,6 +280,9 @@ class QueueManager:
                     connections=conns,
                     headers=req_headers,
                     speed_limit_bps=self.global_speed_limit_bps,
+                    proxy=proxy_url,
+                    auto_retry=auto_retry_en,
+                    max_retries=retries_cnt,
                     on_progress=lambda d, t, s, e: self._on_progress(download_id, d, t, s, e),
                     on_segments_update=lambda segs: self._on_segments(download_id, segs),
                     on_status_change=lambda st, err: self._on_status(download_id, st, err)
@@ -163,6 +291,8 @@ class QueueManager:
 
         # Run downloader in background thread
         threading.Thread(target=downloader.start, daemon=True).start()
+        self.recalculate_bandwidth_allocation()
+        self._update_keep_awake()
 
     def pause_download(self, download_id: str):
         with self.lock:
@@ -175,6 +305,7 @@ class QueueManager:
                     self.on_task_status(download_id, "Paused", "")
         # A slot freed up; check queue to schedule next waiting item
         self._check_queue()
+        self._update_keep_awake()
 
     def resume_download(self, download_id: str, force: bool = True):
         with self.lock:
@@ -187,6 +318,37 @@ class QueueManager:
         if record:
             self.start_download(download_id, force=force)
 
+    def update_download_url(self, download_id: str, new_url: str, new_headers: Optional[Dict[str, str]] = None) -> bool:
+        """
+        Updates the target URL (and optional headers) for an existing download.
+        Preserves existing partial download data on disk, resets error state to Paused.
+        """
+        with self.lock:
+            rec = self.db.get_download(download_id)
+            if not rec:
+                return False
+
+            dl = self.active_downloaders.get(download_id)
+            if dl:
+                was_running = dl.status in ("Downloading", "Probing", "Retrying")
+                if was_running:
+                    dl.pause()
+                if hasattr(dl, "update_url"):
+                    dl.update_url(new_url, new_headers)
+
+            update_data: Dict[str, Any] = {
+                "url": new_url,
+                "error_message": "",
+                "status": "Paused"
+            }
+            if new_headers is not None:
+                update_data["headers_json"] = json.dumps(new_headers)
+
+            self.db.update_download(download_id, **update_data)
+            if self.on_task_status:
+                self.on_task_status(download_id, "Paused", "")
+            return True
+
     def cancel_download(self, download_id: str):
         with self.lock:
             dl = self.active_downloaders.pop(download_id, None)
@@ -196,6 +358,7 @@ class QueueManager:
         if self.on_task_status:
             self.on_task_status(download_id, "Cancelled", "")
         self._check_queue()
+        self._update_keep_awake()
 
     def delete_download(self, download_id: str, delete_file: bool = False):
         self.cancel_download(download_id)
@@ -209,40 +372,65 @@ class QueueManager:
                 pass
         self.db.delete_download(download_id)
 
-    def start_queue(self):
+    def start_queue(self, queue_id: Optional[str] = None):
         """
         Starts the sequential download queue.
-        Marks paused/waiting downloads as Queued if appropriate, then starts up to max_concurrent downloads.
+        If queue_id is provided, only unpauses/queues tasks belonging to that queue.
         """
-        all_dls = self.db.get_all_downloads()
+        all_dls = self.db.get_all_downloads(queue_id=queue_id)
         for dl in all_dls:
-            if dl["status"] == "Paused":
+            if dl["status"] in ("Paused", "Queued"):
                 self.db.update_download(dl["id"], status="Queued")
                 if self.on_task_status:
                     self.on_task_status(dl["id"], "Queued", "")
         self._check_queue()
 
-    def pause_queue(self):
-        """Pauses all currently active downloads."""
+    def pause_queue(self, queue_id: Optional[str] = None):
+        """Pauses currently active downloads. If queue_id provided, only pauses that queue's downloads."""
         with self.lock:
-            for dl in list(self.active_downloaders.values()):
-                dl.pause()
+            for did, dl in list(self.active_downloaders.items()):
+                if queue_id:
+                    rec = self.db.get_download(did)
+                    if rec and rec.get("queue_id") == queue_id:
+                        dl.pause()
+                else:
+                    dl.pause()
+        self._update_keep_awake()
 
     def reorder_queue(self, download_id: str, direction: str) -> bool:
         """Reorders item in queue: direction is 'up' or 'down'."""
-        return self.db.reorder_download(download_id, direction)
+        res = self.db.reorder_download(download_id, direction)
+        if res:
+            self._check_queue()
+        return res
 
     def move_queue_to_top(self, download_id: str) -> bool:
-        return self.db.move_to_top_of_queue(download_id)
+        res = self.db.move_to_top_of_queue(download_id)
+        if res:
+            self._check_queue()
+        return res
+
+    def move_queue_to_bottom(self, download_id: str) -> bool:
+        res = self.db.move_to_bottom_of_queue(download_id)
+        if res:
+            self._check_queue()
+        return res
 
     def get_downloader(self, download_id: str) -> Optional[MultiThreadDownloader]:
         with self.lock:
             return self.active_downloaders.get(download_id)
 
+    def get_download(self, download_id: str) -> Optional[Dict[str, Any]]:
+        return self.db.get_download(download_id)
+
+    def get_all_downloads(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        return self.db.get_all_downloads(category=category)
+
     def attach_scheduler(self, scheduler: DownloadScheduler):
         self.scheduler = scheduler
         scheduler.on_schedule_start = lambda: self.start_queue()
         scheduler.on_schedule_stop = lambda act: self._handle_scheduler_stop(act)
+        scheduler.on_speed_limit_change = lambda bps: self.set_global_speed_limit(bps)
 
     def _handle_scheduler_stop(self, action: str):
         self.pause_queue()
@@ -268,6 +456,10 @@ class QueueManager:
         # Update filename, path, and category in db if probe resolved them
         with self.lock:
             dl = self.active_downloaders.get(download_id)
+            extra_kwargs = {}
+            if status == "Completed":
+                extra_kwargs["date_completed"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             if dl and dl.filename:
                 cat = detect_category(dl.filename)
                 self.db.update_download(
@@ -277,22 +469,41 @@ class QueueManager:
                     total_size=dl.total_size,
                     category=cat,
                     status=status,
-                    error_message=error
+                    error_message=error,
+                    **extra_kwargs
                 )
             else:
-                self.db.update_download(download_id, status=status, error_message=error)
+                self.db.update_download(download_id, status=status, error_message=error, **extra_kwargs)
 
         if status in ("Completed", "Cancelled", "Error", "Paused"):
             with self.lock:
                 if status in ("Completed", "Cancelled", "Error"):
                     self.active_downloaders.pop(download_id, None)
             self._check_queue()
+            self.recalculate_bandwidth_allocation()
+            self._update_keep_awake()
+
+        if status == "Completed":
+            try:
+                rec = self.db.get_download(download_id)
+                if rec:
+                    execute_post_download(rec, self.db.get_automation_settings())
+            except Exception as e:
+                print(f"[QueueManager] Post download hook error: {e}")
 
         if self.on_task_status:
             self.on_task_status(download_id, status, error)
 
     def _check_queue(self):
         """Schedule next queued item if concurrent capacity is available."""
+        # Check metered connection restriction before launching queued items
+        metered_cfg = self.db.get_metered_settings()
+        if metered_cfg.get("pause_on_metered", True) and not self.metered_bypass:
+            if is_metered_connection():
+                if self.on_metered_blocked:
+                    self.on_metered_blocked("")
+                return
+
         with self.lock:
             active_count = len([d for d in self.active_downloaders.values() if d.status in ("Downloading", "Probing")])
             slots_available = self.max_concurrent - active_count

@@ -11,7 +11,7 @@ import httpx
 import xml.etree.ElementTree as ET
 
 from core.speed_limiter import SpeedLimiter
-from core.social_resolver import SocialResolver, is_tiktok_url, is_instagram_url
+from core.social_resolver import SocialResolver, is_tiktok_url, is_instagram_url, is_twitter_url
 
 STREAM_DOMAINS = (
     "youtube.com", "youtu.be",
@@ -66,6 +66,12 @@ class StreamDownloader:
                  quality: str = "max",
                  headers: Optional[Dict[str, str]] = None,
                  speed_limit_bps: int = 0,
+                 proxy: Optional[str] = None,
+                 browser_cookies: Optional[str] = None,
+                 download_subtitles: bool = False,
+                 subtitles_langs: Optional[List[str]] = None,
+                 download_thumbnail: bool = False,
+                 embed_metadata: bool = True,
                  on_progress: Optional[Callable[[int, int, float, int], None]] = None,
                  on_segments_update: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
                  on_status_change: Optional[Callable[[str, str], None]] = None):
@@ -78,6 +84,12 @@ class StreamDownloader:
         self.quality = quality.lower() if quality else "max"
         self.headers = headers or {}
         self.speed_limiter = SpeedLimiter(speed_limit_bps)
+        self.proxy = proxy
+        self.browser_cookies = browser_cookies
+        self.download_subtitles = download_subtitles
+        self.subtitles_langs = subtitles_langs or ["tr", "en"]
+        self.download_thumbnail = download_thumbnail
+        self.embed_metadata = embed_metadata
 
         self.on_progress = on_progress
         self.on_segments_update = on_segments_update
@@ -181,15 +193,42 @@ class StreamDownloader:
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
                 }
             }
+            if self.proxy:
+                ydl_opts["proxy"] = self.proxy
+
+            if self.browser_cookies and self.browser_cookies.lower() not in ("none", "disabled", "devre dışı"):
+                b_name = self.browser_cookies.lower().strip()
+                if b_name in ("chrome", "firefox", "edge", "brave", "opera", "vivaldi", "safari"):
+                    ydl_opts["cookiesfrombrowser"] = (b_name,)
 
             if is_audio_only:
-                ydl_opts["postprocessors"] = [{
+                pps = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
                     "preferredquality": "192",
                 }]
+                if self.embed_metadata:
+                    ydl_opts["writethumbnail"] = True
+                    pps.append({"key": "FFmpegMetadata", "add_metadata": True})
+                    pps.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg"})
+                    pps.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
+                ydl_opts["postprocessors"] = pps
             else:
                 ydl_opts["merge_output_format"] = "mp4"
+                pps = []
+                if self.download_thumbnail:
+                    ydl_opts["writethumbnail"] = True
+                    pps.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg"})
+                if self.embed_metadata:
+                    pps.append({"key": "FFmpegMetadata", "add_metadata": True})
+                if pps:
+                    ydl_opts["postprocessors"] = pps
+
+            if self.download_subtitles:
+                ydl_opts["writesubtitles"] = True
+                ydl_opts["writeautomaticsub"] = True
+                ydl_opts["subtitleslangs"] = self.subtitles_langs
+                ydl_opts["subtitlesformat"] = "srt/best"
 
             # Avoid passing raw browser cookies for YouTube or Twitter/X as it triggers anti-bot blocks
             u_lower = self.url.lower()
@@ -209,6 +248,9 @@ class StreamDownloader:
             elif is_instagram_url(self.url):
                 self._set_status("Probing", "Instagram Reels bağlantısı çözülüyor...")
                 social_info = SocialResolver.resolve_instagram(self.url, cookies=self.headers.get("Cookie"))
+            elif is_twitter_url(self.url):
+                self._set_status("Probing", "X (Twitter) video bağlantısı çözülüyor...")
+                social_info = SocialResolver.resolve_twitter(self.url)
 
             if social_info and social_info.get("video_url"):
                 if is_audio_only and social_info.get("audio_url"):
@@ -441,3 +483,13 @@ class StreamDownloader:
 
     def set_speed_limit(self, bps: int):
         self.speed_limiter.set_limit(bps)
+
+    def update_url(self, new_url: str, new_headers: Optional[Dict[str, str]] = None):
+        """Updates target URL for refresh and resets error state."""
+        self.url = new_url
+        if new_headers is not None:
+            self.headers = new_headers
+        if self.status == "Error":
+            self.status = "Paused"
+            self.error_message = ""
+

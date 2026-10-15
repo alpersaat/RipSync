@@ -259,7 +259,56 @@ class SchedulerDialog(QDialog):
         a_layout.addStretch()
 
         layout.addWidget(self.grp_actions)
+
+        # Speed Schedule Throttling Group
+        self.grp_speed_schedule = QGroupBox("⚡ Akıllı Hız Limiti Zamanlaması (Gündüz Sınırla / Gece Tam Hız)")
+        ss_layout = QVBoxLayout(self.grp_speed_schedule)
+
+        self.chk_enable_speed_schedule = QCheckBox("Belirli saatlerde hız limiti uygula (Diğer saatlerde sınırsız tam hız)")
+        self.chk_enable_speed_schedule.setStyleSheet("font-weight: bold; color: #2ac3de;")
+        self.chk_enable_speed_schedule.toggled.connect(self._on_speed_schedule_toggled)
+        ss_layout.addWidget(self.chk_enable_speed_schedule)
+
+        row_ss = QHBoxLayout()
+        row_ss.addWidget(QLabel("Saat Aralığı:"))
+        self.time_speed_start = QTimeEdit(QTime(9, 0))
+        self.time_speed_start.setDisplayFormat("HH:mm")
+        self.time_speed_start.setFixedWidth(75)
+        row_ss.addWidget(self.time_speed_start)
+
+        row_ss.addWidget(QLabel("-"))
+        self.time_speed_end = QTimeEdit(QTime(18, 0))
+        self.time_speed_end.setDisplayFormat("HH:mm")
+        self.time_speed_end.setFixedWidth(75)
+        row_ss.addWidget(self.time_speed_end)
+
+        row_ss.addWidget(QLabel("Hız Limiti:"))
+        self.combo_speed_schedule_limit = QComboBox()
+        for label, val in [
+            ("512 KB/s", 512),
+            ("1 MB/s", 1024),
+            ("2 MB/s (Önerilen)", 2048),
+            ("5 MB/s", 5120),
+            ("10 MB/s", 10240),
+            ("25 MB/s", 25600)
+        ]:
+            self.combo_speed_schedule_limit.addItem(label, val)
+        self.combo_speed_schedule_limit.setCurrentIndex(2)
+        row_ss.addWidget(self.combo_speed_schedule_limit)
+        row_ss.addStretch()
+        ss_layout.addLayout(row_ss)
+
+        lbl_ss_note = QLabel("💡 Belirlenen saatlerde (ör. 09:00 - 18:00) hız sınırı otomatik devreye girer; bu saatler dışında indirmeler tam hızda çalışır.")
+        lbl_ss_note.setStyleSheet("color: #7982a9; font-size: 11px;")
+        ss_layout.addWidget(lbl_ss_note)
+
+        layout.addWidget(self.grp_speed_schedule)
         layout.addStretch()
+
+    def _on_speed_schedule_toggled(self, checked: bool):
+        self.time_speed_start.setEnabled(checked)
+        self.time_speed_end.setEnabled(checked)
+        self.combo_speed_schedule_limit.setEnabled(checked)
 
     def _init_queue_tab(self, parent: QWidget):
         layout = QVBoxLayout(parent)
@@ -380,6 +429,22 @@ class SchedulerDialog(QDialog):
         if idx_act >= 0:
             self.combo_stop_action.setCurrentIndex(idx_act)
 
+        # Load speed schedule settings
+        ss_en = sched.get("speed_schedule_enabled", False)
+        self.chk_enable_speed_schedule.setChecked(bool(ss_en))
+        self._on_speed_schedule_toggled(bool(ss_en))
+
+        ss_start = parse_time_str(sched.get("speed_schedule_start", "09:00"))
+        self.time_speed_start.setTime(QTime(ss_start.hour, ss_start.minute))
+
+        ss_end = parse_time_str(sched.get("speed_schedule_end", "18:00"))
+        self.time_speed_end.setTime(QTime(ss_end.hour, ss_end.minute))
+
+        ss_limit = sched.get("speed_schedule_limit_kb", 2048)
+        idx_ss = self.combo_speed_schedule_limit.findData(int(ss_limit))
+        if idx_ss >= 0:
+            self.combo_speed_schedule_limit.setCurrentIndex(idx_ss)
+
         # Load concurrency settings
         max_c = self.db.get_setting("max_concurrent", 2)
         self.spin_concurrent.setValue(int(max_c))
@@ -398,6 +463,12 @@ class SchedulerDialog(QDialog):
         action = self.combo_stop_action.currentData() or "pause_all"
         max_concurrent = self.spin_concurrent.value()
 
+        # Speed schedule values
+        speed_schedule_enabled = self.chk_enable_speed_schedule.isChecked()
+        speed_schedule_start = self.time_speed_start.time().toString("HH:mm")
+        speed_schedule_end = self.time_speed_end.time().toString("HH:mm")
+        speed_schedule_limit_kb = self.combo_speed_schedule_limit.currentData() or 2048
+
         sched_settings = {
             "enabled": enabled,
             "start_time": start_str,
@@ -405,7 +476,11 @@ class SchedulerDialog(QDialog):
             "stop_time": stop_str,
             "days": active_days,
             "on_stop_action": action,
-            "auto_start_if_in_window": True
+            "auto_start_if_in_window": True,
+            "speed_schedule_enabled": speed_schedule_enabled,
+            "speed_schedule_start": speed_schedule_start,
+            "speed_schedule_end": speed_schedule_end,
+            "speed_schedule_limit_kb": speed_schedule_limit_kb
         }
 
         # Save to database

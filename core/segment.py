@@ -17,6 +17,7 @@ class Segment(threading.Thread):
                  current_byte: Optional[int] = None,
                  headers: Optional[dict] = None,
                  speed_limiter: Optional[SpeedLimiter] = None,
+                 proxy: Optional[str] = None,
                  on_progress: Optional[Callable[[int, int], None]] = None,
                  on_error: Optional[Callable[[int, Exception], None]] = None,
                  on_complete: Optional[Callable[[int], None]] = None):
@@ -29,6 +30,7 @@ class Segment(threading.Thread):
         self.current_byte = current_byte if current_byte is not None else start_byte
         self.headers = headers or {}
         self.speed_limiter = speed_limiter
+        self.proxy = proxy
         self.on_progress = on_progress
         self.on_error = on_error
         self.on_complete = on_complete
@@ -88,7 +90,10 @@ class Segment(threading.Thread):
         speed_window_size = 5
 
         try:
-            with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(30.0, read=60.0)) as client:
+            client_kwargs = {"follow_redirects": True, "timeout": httpx.Timeout(30.0, read=60.0)}
+            if self.proxy:
+                client_kwargs["proxy"] = self.proxy
+            with httpx.Client(**client_kwargs) as client:
                 with client.stream("GET", self.url, headers=req_headers) as response:
                     # 206 Partial Content or 200 OK
                     if response.status_code not in (200, 206):

@@ -100,14 +100,16 @@ class ProgressDialog(QDialog):
     resume_requested = pyqtSignal(str)
     cancel_requested = pyqtSignal(str)
     speed_limit_changed = pyqtSignal(str, int)  # download_id, bytes_per_sec (0 for unlimited)
+    auto_open_changed = pyqtSignal(str, bool)    # download_id, auto_open flag
 
-    def __init__(self, download_id: str, filename: str, save_path: str, initial_speed_limit: int = 0, parent=None):
+    def __init__(self, download_id: str, filename: str, save_path: str, initial_speed_limit: int = 0, initial_auto_open: bool = False, parent=None):
         super().__init__(parent)
         self.download_id = download_id
         self.filename = filename
         self.save_path = save_path
         self.is_paused = False
         self.current_speed_limit_bps = initial_speed_limit
+        self.initial_auto_open = initial_auto_open
 
         self.setWindowTitle(f"İndiriliyor: {filename}")
         self.resize(580, 420)
@@ -230,7 +232,12 @@ class ProgressDialog(QDialog):
             self._update_limit_label(kb)
         else:
             self.chk_limit.setChecked(False)
-            self.lbl_limit_val.setText("Sınırsız (Tam Hız)")
+        # Auto-open checkbox
+        self.chk_auto_open = QCheckBox("🏁 İndirme tamamlandığında dosyayı otomatik aç")
+        self.chk_auto_open.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-top: 4px;")
+        self.chk_auto_open.setChecked(self.initial_auto_open)
+        self.chk_auto_open.toggled.connect(lambda checked: self.auto_open_changed.emit(self.download_id, checked))
+        layout.addWidget(self.chk_auto_open)
 
         # Buttons
         btn_layout = QHBoxLayout()

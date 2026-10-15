@@ -8,10 +8,13 @@ from core.database import (
     get_categorized_save_dir,
     Database
 )
+import core.categories as direct_categories
 from core.queue_manager import QueueManager
 
 def test_smart_categorization():
     print("=== Testing Auto Smart Categorization Rules ===")
+    assert direct_categories.detect_category("test.mp4") == "Video"
+    assert direct_categories.get_category_folder("Video") == get_category_folder("Video")
 
     # Test cases requested by the user:
     # .mp4, .mkv, .avi ➔ İndirilenler / Videolar

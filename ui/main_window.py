@@ -6,26 +6,83 @@ from PyQt6.QtWidgets import (
     QSplitter, QTreeWidget, QTreeWidgetItem, QTableWidget,
     QTableWidgetItem, QHeaderView, QToolBar, QPushButton,
     QLabel, QProgressBar, QMenu, QMessageBox, QStatusBar,
-    QApplication, QSystemTrayIcon, QSlider, QCheckBox, QComboBox, QSpinBox
+    QApplication, QSystemTrayIcon, QSlider, QCheckBox, QComboBox, QSpinBox,
+    QLineEdit, QFileDialog, QInputDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData
+from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut, QDrag, QDragEnterEvent, QDropEvent
 
-from ui.styles import DARK_THEME, format_size, format_progress_size, format_speed, format_eta
+from datetime import datetime
+from ui.styles import DARK_THEME, get_theme_stylesheet, format_size, format_progress_size, format_speed, format_eta
 from ui.add_download_dialog import AddDownloadDialog
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
 from ui.power_countdown_dialog import PowerCountdownDialog
 from ui.scheduler_dialog import SchedulerDialog
 from ui.playlist_dialog import PlaylistDownloadDialog
+from ui.batch_add_dialog import BatchAddDialog, extract_valid_urls
+from ui.checksum_dialog import ChecksumDialog
+from ui.properties_dialog import DownloadPropertiesDialog
+from ui.statistics_dialog import StatisticsDialog
+from ui.refresh_url_dialog import RefreshUrlDialog
+from ui.bandwidth_graph import BandwidthGraphWidget
 from ui.tray_icon import create_default_icon, TrayIcon
 from ui.clipboard_monitor import ClipboardMonitor
 from ui.clipboard_popup import ClipboardNotificationPopup
+from ui.duplicate_dialog import DuplicateDownloadDialog
 from core.database import Database
 from core.queue_manager import QueueManager
 from core.power_manager import PowerCountdownManager
 from core.scheduler import DownloadScheduler
 from core.playlist_parser import is_youtube_playlist_url
+from core.paths import show_in_explorer, get_disk_total_and_free, get_disk_free_space
+from core.notifier import play_completion_sound, play_error_sound
+from core.extractor import is_archive_file, extract_archive_async
+from core.site_rules import SiteRulesManager
+from core.metered_connection import MeteredConnectionMonitor, is_metered_connection
+
+
+class NumericTableWidgetItem(QTableWidgetItem):
+    """QTableWidgetItem with numerical comparison support for size, progress, speed, and ETA."""
+    def __lt__(self, other):
+        if isinstance(other, QTableWidgetItem):
+            val1 = self.data(Qt.ItemDataRole.UserRole)
+            val2 = other.data(Qt.ItemDataRole.UserRole)
+            if val1 is not None and val2 is not None:
+                if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
+                    return val1 < val2
+        return super().__lt__(other)
+
+
+class DownloadsTableWidget(QTableWidget):
+    """Custom table widget supporting drag & drop outward (dragging completed files to Explorer/apps)."""
+    def __init__(self, parent_window=None, parent=None):
+        super().__init__(parent)
+        self.parent_window = parent_window
+        self.setDragEnabled(True)
+
+    def startDrag(self, supportedActions):
+        selected_rows = set(item.row() for item in self.selectedItems())
+        urls = []
+        if self.parent_window:
+            for r in selected_rows:
+                item = self.item(r, 0)
+                if item:
+                    did = item.data(Qt.ItemDataRole.UserRole)
+                    rec = self.parent_window.queue_mgr.get_download(did)
+                    if rec and rec.get("status") == "Completed":
+                        spath = rec.get("save_path")
+                        if spath and os.path.exists(spath):
+                            urls.append(QUrl.fromLocalFile(os.path.abspath(spath)))
+        if urls:
+            drag = QDrag(self)
+            mime = QMimeData()
+            mime.setUrls(urls)
+            drag.setMimeData(mime)
+            drag.exec(Qt.DropAction.CopyAction)
+        else:
+            super().startDrag(supportedActions)
+
 
 class MainWindow(QMainWindow):
     # Cross-thread UI signal
@@ -48,11 +105,19 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("RipSync - Internet Download Manager")
         self.setWindowIcon(create_default_icon())
-        self.resize(1000, 620)
-        self.setStyleSheet(DARK_THEME)
+        thm_cfg = self.db.get_theme_settings()
+        self.setStyleSheet(get_theme_stylesheet(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue")))
 
         self.current_category = "All"
+        self.current_tag: Optional[str] = None
+        self.current_queue_id: Optional[str] = None
+        self.site_rules_mgr = SiteRulesManager(self.db)
         self.active_dialogs: Dict[str, ProgressDialog] = {}
+
+        # Metered Connection Monitor
+        self.metered_monitor = MeteredConnectionMonitor(check_interval_ms=25000, parent=self)
+        self.metered_monitor.metered_changed.connect(self._on_metered_status_changed)
+        self.queue_mgr.on_metered_blocked = self._on_metered_blocked
 
         # Power Countdown Manager
         self.power_mgr = PowerCountdownManager(countdown_seconds=30)
@@ -73,8 +138,12 @@ class MainWindow(QMainWindow):
         self.clip_popup.download_requested.connect(self._handle_clipboard_download)
 
         self.clip_monitor = ClipboardMonitor(self)
-        clip_enabled = bool(self.db.get_setting("clipboard_enabled", True))
-        self.clip_monitor.set_enabled(clip_enabled)
+        clip_cfg = self.db.get_clipboard_settings()
+        self.clip_monitor.configure(
+            enabled=bool(clip_cfg.get("enabled", True)),
+            only_media=bool(clip_cfg.get("only_media", False)),
+            ignore_domains=clip_cfg.get("ignore_domains")
+        )
         self.clip_monitor.link_detected.connect(self._on_clipboard_link_detected)
 
         # Tray Icon
@@ -107,6 +176,11 @@ class MainWindow(QMainWindow):
         self.act_playlist.setToolTip("YouTube Çalma Listesindeki Videoları Toplu Tara ve İndir")
         self.act_playlist.triggered.connect(lambda: self._show_playlist_dialog())
         toolbar.addAction(self.act_playlist)
+
+        self.act_batch_add = QAction("📋 Toplu Link Ekle", self)
+        self.act_batch_add.setToolTip("Birden fazla web bağlantısını tek seferde toplu olarak ekle (Ctrl+B)")
+        self.act_batch_add.triggered.connect(lambda: self._show_batch_add_dialog())
+        toolbar.addAction(self.act_batch_add)
 
         toolbar.addSeparator()
 
@@ -163,6 +237,16 @@ class MainWindow(QMainWindow):
         self.act_extension.setToolTip("Chrome / Edge Tarayıcı Eklentisi Kurulum Kılavuzu")
         self.act_extension.triggered.connect(self._show_extension_guide)
         toolbar.addAction(self.act_extension)
+
+        self.act_statistics = QAction("📊 İstatistikler", self)
+        self.act_statistics.setToolTip("İndirme İstatistikleri ve Ağ Trafiği Raporunu Aç")
+        self.act_statistics.triggered.connect(self._show_statistics_dialog)
+        toolbar.addAction(self.act_statistics)
+
+        self.act_clean_missing = QAction("🧹 Eksik Dosyaları Temizle", self)
+        self.act_clean_missing.setToolTip("Diskten silinmiş veya taşınmış tamamlanmış indirmeleri listeden ayıkla")
+        self.act_clean_missing.triggered.connect(self._clean_missing_files)
+        toolbar.addAction(self.act_clean_missing)
 
         toolbar.addSeparator()
 
@@ -325,11 +409,97 @@ class MainWindow(QMainWindow):
             root_all.addChild(item)
 
         root_all.setExpanded(True)
+
+        self.root_tags = QTreeWidgetItem(["🏷️ Etiketler"])
+        self.root_tags.setData(0, Qt.ItemDataRole.UserRole, "__TAGS_ROOT__")
+        self.tree_categories.addTopLevelItem(self.root_tags)
+        self.root_tags.setExpanded(True)
+        self._refresh_tags_tree()
+
+        self.root_queues = QTreeWidgetItem(["🗂️ Kuyruklar"])
+        self.root_queues.setData(0, Qt.ItemDataRole.UserRole, "__QUEUES_ROOT__")
+        self.tree_categories.addTopLevelItem(self.root_queues)
+        self.root_queues.setExpanded(True)
+        self._refresh_queues_tree()
+
+        self.tree_categories.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree_categories.customContextMenuRequested.connect(self._show_categories_tree_context_menu)
+
         self.tree_categories.currentItemChanged.connect(self._on_category_changed)
         splitter.addWidget(self.tree_categories)
 
-        # Right: Downloads Table
-        self.table = QTableWidget()
+        # Right: Container with Live Search & Filter Bar + Downloads Table
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
+
+        # Search & Filter Bar
+        search_filter_bar = QWidget()
+        sf_layout = QHBoxLayout(search_filter_bar)
+        sf_layout.setContentsMargins(2, 2, 2, 4)
+        sf_layout.setSpacing(6)
+
+        self.edit_search = QLineEdit()
+        self.edit_search.setPlaceholderText("🔍 Dosya adı veya link ara... (Ctrl+F)")
+        self.edit_search.setClearButtonEnabled(True)
+        self.edit_search.setStyleSheet(
+            "QLineEdit { background-color: #1f2335; border: 1px solid #3b4261; border-radius: 6px; padding: 4px 10px; color: #c0caf5; font-size: 12px; min-height: 22px; }"
+            "QLineEdit:focus { border: 1px solid #7aa2f7; }"
+        )
+        self.edit_search.textChanged.connect(self._apply_search_and_filter)
+        sf_layout.addWidget(self.edit_search, stretch=1)
+
+        # Quick Status Filter Chips
+        self.filter_btn_group = {}
+        for chip_id, chip_label in [
+            ("all", "Tümü"),
+            ("Downloading", "⏳ İnenler"),
+            ("Completed", "✔ Tamamlanan"),
+            ("Paused", "⏸ Duraklatılan"),
+            ("Error", "❌ Hatalı"),
+        ]:
+            btn = QPushButton(chip_label)
+            btn.setCheckable(True)
+            btn.setChecked(chip_id == "all")
+            btn.setStyleSheet(
+                "QPushButton { background-color: #24283b; border: 1px solid #3b4261; border-radius: 5px; padding: 4px 8px; color: #a9b1d6; font-size: 11px; font-weight: bold; min-height: 20px; }"
+                "QPushButton:checked { background-color: #7aa2f7; color: #1a1b26; border-color: #7aa2f7; }"
+                "QPushButton:hover:!checked { background-color: #2f3549; color: #c0caf5; }"
+            )
+            btn.clicked.connect(lambda checked, c=chip_id: self._on_filter_chip_clicked(c))
+            self.filter_btn_group[chip_id] = btn
+            sf_layout.addWidget(btn)
+
+        # Multi-criteria Filter Combos
+        self.combo_size_filter = QComboBox()
+        self.combo_size_filter.addItem("📏 Boyut: Tümü", "all")
+        self.combo_size_filter.addItem("< 50 MB", "small")
+        self.combo_size_filter.addItem("50 - 500 MB", "medium")
+        self.combo_size_filter.addItem("500 MB - 2 GB", "large")
+        self.combo_size_filter.addItem("> 2 GB", "huge")
+        self.combo_size_filter.setFixedWidth(115)
+        self.combo_size_filter.currentIndexChanged.connect(self._apply_search_and_filter)
+        sf_layout.addWidget(self.combo_size_filter)
+
+        self.combo_date_filter = QComboBox()
+        self.combo_date_filter.addItem("📅 Tarih: Tümü", "all")
+        self.combo_date_filter.addItem("Bugün", "today")
+        self.combo_date_filter.addItem("Dün", "yesterday")
+        self.combo_date_filter.addItem("Son 7 Gün", "week")
+        self.combo_date_filter.addItem("Daha Eski", "older")
+        self.combo_date_filter.setFixedWidth(115)
+        self.combo_date_filter.currentIndexChanged.connect(self._apply_search_and_filter)
+        sf_layout.addWidget(self.combo_date_filter)
+
+        self.lbl_filter_count = QLabel("0 / 0")
+        self.lbl_filter_count.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: bold; padding: 0 4px;")
+        sf_layout.addWidget(self.lbl_filter_count)
+
+        right_layout.addWidget(search_filter_bar)
+
+        # Downloads Table (supports drag-and-drop file export)
+        self.table = DownloadsTableWidget(parent_window=self)
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
             "Dosya Adı", "Boyut", "İlerleme", "Hız", "Kalan Süre", "Durum", "Eklenme Tarihi"
@@ -346,11 +516,36 @@ class MainWindow(QMainWindow):
         self.table.customContextMenuRequested.connect(self._show_table_context_menu)
         self.table.cellDoubleClicked.connect(self._on_row_double_click)
 
+        # Smart column sorting
+        self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSortIndicatorShown(True)
+
+        # Enable Drag & Drop onto MainWindow
+        self.setAcceptDrops(True)
+
         # Keyboard shortcuts for table
         self.shortcut_delete = QShortcut(QKeySequence.StandardKey.Delete, self.table)
         self.shortcut_delete.activated.connect(self._delete_selected)
 
-        splitter.addWidget(self.table)
+        # Queue reordering shortcuts (Ctrl+Up / Ctrl+Down)
+        self.shortcut_up = QShortcut(QKeySequence("Ctrl+Up"), self.table)
+        self.shortcut_up.activated.connect(lambda: self._move_selected_queue("up"))
+
+        self.shortcut_down = QShortcut(QKeySequence("Ctrl+Down"), self.table)
+        self.shortcut_down.activated.connect(lambda: self._move_selected_queue("down"))
+
+        # Global Search and Batch Shortcuts
+        self.shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.shortcut_search.activated.connect(self.edit_search.setFocus)
+
+        self.shortcut_esc = QShortcut(QKeySequence("Escape"), self.edit_search)
+        self.shortcut_esc.activated.connect(self._clear_search)
+
+        self.shortcut_batch = QShortcut(QKeySequence("Ctrl+B"), self)
+        self.shortcut_batch.activated.connect(lambda: self._show_batch_add_dialog())
+
+        right_layout.addWidget(self.table)
+        splitter.addWidget(right_panel)
         splitter.setSizes([200, 800])
 
         # Status Bar
@@ -360,9 +555,20 @@ class MainWindow(QMainWindow):
         self.lbl_ext_status.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 10px;")
         self.status_bar.addWidget(self.lbl_ext_status)
 
+        # Real-time Bandwidth Sparkline Graph (Clickable -> Opens Statistics)
+        self.speed_graph = BandwidthGraphWidget(parent=self)
+        self.speed_graph.setToolTip("Son 40 sn hız grafiği (Detaylı İstatistikler için tıklayın)")
+        self.speed_graph.mousePressEvent = lambda e: self._show_statistics_dialog()
+        self.status_bar.addWidget(self.speed_graph)
+
         self.lbl_speed_stat = QLabel("Toplam Hız: 0 KB/s")
-        self.lbl_speed_stat.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-left: 20px;")
+        self.lbl_speed_stat.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-left: 10px;")
         self.status_bar.addWidget(self.lbl_speed_stat)
+
+        # Disk Free Space Indicator
+        self.lbl_disk_stat = QLabel("💾 Disk: Taranıyor...")
+        self.lbl_disk_stat.setStyleSheet("color: #7dcfff; font-weight: bold; margin-left: 15px;")
+        self.status_bar.addWidget(self.lbl_disk_stat)
 
         self.lbl_limiter_stat = QLabel("⚡ Hız Sınırı: Kapalı (Tam Hız)")
         self.lbl_limiter_stat.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 20px;")
@@ -371,6 +577,34 @@ class MainWindow(QMainWindow):
         self.lbl_scheduler_stat = QLabel("⏱ Zamanlayıcı: Kapalı")
         self.lbl_scheduler_stat.setStyleSheet("color: #7982a9; font-weight: bold; margin-left: 20px;")
         self.status_bar.addWidget(self.lbl_scheduler_stat)
+
+        # Metered Connection Status Button
+        self.btn_metered_stat = QPushButton("📶 Tarifeli Bağlantı (Kota Koruması Aktif - Tıkla)")
+        self.btn_metered_stat.setStyleSheet("""
+            QPushButton {
+                background-color: #f7768e;
+                color: #1a1b26;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 8px;
+                margin-left: 15px;
+            }
+            QPushButton:hover {
+                background-color: #ff9e64;
+            }
+        """)
+        self.btn_metered_stat.setToolTip("Tarifeli mobil veri / hotspot bağlantısı algılandı. Tıklayarak kota korumasını geçici olarak devre dışı bırakabilirsiniz.")
+        self.btn_metered_stat.clicked.connect(self._on_metered_btn_clicked)
+        self.btn_metered_stat.hide()
+        self.status_bar.addWidget(self.btn_metered_stat)
+
+        # Timer for smooth speed graph decay and disk space sync
+        self.timer_speed_decay = QTimer(self)
+        self.timer_speed_decay.setInterval(1000)
+        self.timer_speed_decay.timeout.connect(self._on_speed_decay_tick)
+        self.timer_speed_decay.start()
+
+        self._update_disk_space_ui()
 
         # Load initial speed limit state into toolbar controls
         self._init_speed_limiter_controls()
@@ -411,9 +645,10 @@ class MainWindow(QMainWindow):
 
     def _load_downloads_to_table(self):
         self.table.setRowCount(0)
-        downloads = self.db.get_all_downloads()
+        downloads = self.queue_mgr.get_all_downloads()
         for dl in downloads:
             self._add_or_update_table_row(dl)
+        self._apply_search_and_filter()
 
     def _find_row_by_id(self, download_id: str) -> int:
         for r in range(self.table.rowCount()):
@@ -429,23 +664,38 @@ class MainWindow(QMainWindow):
             row = self.table.rowCount()
             self.table.insertRow(row)
 
-        item_name = QTableWidgetItem(dl.get("filename", "download"))
+        fname = dl.get("filename", "download")
+        tags_raw = dl.get("tags", "").strip() if dl.get("tags") else ""
+        display_name = fname
+        if tags_raw:
+            tag_badges = " ".join([f"[{t.strip()}]" for t in tags_raw.split(",") if t.strip()])
+            display_name = f"{fname}  🏷️ {tag_badges}"
+
+        item_name = NumericTableWidgetItem(display_name)
         item_name.setData(Qt.ItemDataRole.UserRole, download_id)
+        if tags_raw:
+            item_name.setToolTip(f"Dosya: {fname}\nEtiketler: {tags_raw}")
         self.table.setItem(row, 0, item_name)
 
         tot = dl.get("total_size", -1)
         done = dl.get("downloaded_size", 0)
         status = dl.get("status", "Queued")
+        eff_size = tot if tot > 0 else done
+
         if status == "Completed" and tot > 0:
-            self.table.setItem(row, 1, QTableWidgetItem(format_size(tot)))
+            txt_size = format_size(tot)
         elif status == "Completed" and done > 0:
-            self.table.setItem(row, 1, QTableWidgetItem(format_size(done)))
-        elif status in ("Downloading", "Paused", "Probing"):
-            self.table.setItem(row, 1, QTableWidgetItem(format_progress_size(done, tot)))
+            txt_size = format_size(done)
+        elif status in ("Downloading", "Paused", "Probing", "Retrying"):
+            txt_size = format_progress_size(done, tot)
         elif tot > 0:
-            self.table.setItem(row, 1, QTableWidgetItem(format_size(tot)))
+            txt_size = format_size(tot)
         else:
-            self.table.setItem(row, 1, QTableWidgetItem("Bilinmiyor"))
+            txt_size = "Bilinmiyor"
+
+        item_size = NumericTableWidgetItem(txt_size)
+        item_size.setData(Qt.ItemDataRole.UserRole, eff_size)
+        self.table.setItem(row, 1, item_size)
 
         # Progress bar widget
         prog = QProgressBar()
@@ -455,37 +705,77 @@ class MainWindow(QMainWindow):
         self.table.setCellWidget(row, 2, prog)
 
         speed = dl.get("speed", 0)
-        self.table.setItem(row, 3, QTableWidgetItem(format_speed(speed) if speed > 0 else "--"))
+        item_spd = NumericTableWidgetItem(format_speed(speed) if speed > 0 else "--")
+        item_spd.setData(Qt.ItemDataRole.UserRole, int(speed))
+        self.table.setItem(row, 3, item_spd)
 
         eta = dl.get("eta", 0)
-        self.table.setItem(row, 4, QTableWidgetItem(format_eta(eta) if eta > 0 else "--"))
+        item_eta = NumericTableWidgetItem(format_eta(eta) if eta > 0 else "--")
+        item_eta.setData(Qt.ItemDataRole.UserRole, int(eta))
+        self.table.setItem(row, 4, item_eta)
 
-        self.table.setItem(row, 5, QTableWidgetItem(status))
+        prio = (dl.get("priority") or "normal").lower()
+        display_status = status
+        prio_tooltip = ""
+        if prio == "high":
+            prio_tooltip = "Bant Genişliği Önceliği: 🚀 Yüksek (%70 Hız Payı)"
+            if status in ("Downloading", "Queued", "Probing", "Retrying"):
+                display_status = f"🚀 {status}"
+        elif prio == "low":
+            prio_tooltip = "Bant Genişliği Önceliği: 🐢 Düşük (%10 Hız Payı)"
+            if status in ("Downloading", "Queued", "Probing", "Retrying"):
+                display_status = f"🐢 {status}"
+        else:
+            prio_tooltip = "Bant Genişliği Önceliği: ⚖️ Normal"
+
+        if status == "Completed":
+            spath = dl.get("save_path", "")
+            if spath and not os.path.exists(spath):
+                display_status = "⚠️ Dosya Eksik"
+                item_name.setToolTip(f"⚠️ Dosya disk üzerinde bulunamadı (silinmiş veya taşınmış):\n{spath}")
+                item_name.setText(f"⚠️ {dl.get('filename', 'download')}")
+
+        item_status = NumericTableWidgetItem(display_status)
+        item_status.setData(Qt.ItemDataRole.UserRole, status)
+        item_status.setToolTip(prio_tooltip)
+        self.table.setItem(row, 5, item_status)
 
         date_add = dl.get("date_added", "")
-        self.table.setItem(row, 6, QTableWidgetItem(date_add))
+        item_date = NumericTableWidgetItem(date_add)
+        item_date.setData(Qt.ItemDataRole.UserRole, date_add)
+        self.table.setItem(row, 6, item_date)
+        self._apply_search_and_filter()
 
     def _handle_progress_update(self, download_id: str, downloaded: int, total: int, speed: float, eta: int):
         row = self._find_row_by_id(download_id)
         if row >= 0:
-            self.table.item(row, 1).setText(format_progress_size(downloaded, total))
+            col1 = self.table.item(row, 1)
+            if col1:
+                col1.setText(format_progress_size(downloaded, total))
+                col1.setData(Qt.ItemDataRole.UserRole, downloaded)
             if total > 0:
                 pct = int((downloaded / total) * 100)
                 prog = self.table.cellWidget(row, 2)
                 if isinstance(prog, QProgressBar):
                     prog.setValue(min(100, pct))
-            self.table.item(row, 3).setText(format_speed(speed))
-            self.table.item(row, 4).setText(format_eta(eta))
+            col3 = self.table.item(row, 3)
+            if col3:
+                col3.setText(format_speed(speed))
+                col3.setData(Qt.ItemDataRole.UserRole, int(speed))
+            col4 = self.table.item(row, 4)
+            if col4:
+                col4.setText(format_eta(eta))
+                col4.setData(Qt.ItemDataRole.UserRole, int(eta))
 
         # Forward to open progress dialog if visible
         if download_id in self.active_dialogs:
             self.active_dialogs[download_id].update_progress(downloaded, total, speed, eta)
 
-        # Update total speed in status bar
-        active_speeds = [d.speed_limiter.get_limit() or sum(s.current_speed for s in d.segments)
-                         for d in self.queue_mgr.active_downloaders.values()]
+        # Update total speed in status bar and real-time bandwidth graph
         tot_speed = sum(sum(s.current_speed for s in d.segments) for d in self.queue_mgr.active_downloaders.values())
         self.lbl_speed_stat.setText(f"Toplam Hız: {format_speed(tot_speed)}")
+        if hasattr(self, "speed_graph"):
+            self.speed_graph.add_speed_sample(tot_speed)
 
     def _handle_segments_update(self, download_id: str, segments: list):
         if download_id in self.active_dialogs:
@@ -496,27 +786,49 @@ class MainWindow(QMainWindow):
     def _handle_status_update(self, download_id: str, status: str, err: str):
         row = self._find_row_by_id(download_id)
         if row >= 0:
-            self.table.item(row, 5).setText(status)
-            rec = self.db.get_download(download_id)
+            item_st = self.table.item(row, 5)
+            if item_st:
+                item_st.setText(status)
+                item_st.setData(Qt.ItemDataRole.UserRole, status)
+
+            rec = self.queue_mgr.get_download(download_id)
             if rec:
                 if rec.get("filename"):
-                    self.table.item(row, 0).setText(rec["filename"])
+                    item_f = self.table.item(row, 0)
+                    if item_f:
+                        item_f.setText(rec["filename"])
                 t_size = rec.get("total_size", -1)
                 d_size = rec.get("downloaded_size", 0)
-                if status == "Completed":
-                    final_size = t_size if t_size > 0 else d_size
-                    self.table.item(row, 1).setText(format_size(final_size))
-                elif status in ("Downloading", "Paused", "Probing"):
-                    self.table.item(row, 1).setText(format_progress_size(d_size, t_size))
-                elif t_size > 0:
-                    self.table.item(row, 1).setText(format_size(t_size))
+                col1 = self.table.item(row, 1)
+                if col1:
+                    if status == "Completed":
+                        final_size = t_size if t_size > 0 else d_size
+                        col1.setText(format_size(final_size))
+                        col1.setData(Qt.ItemDataRole.UserRole, final_size)
+                    elif status in ("Downloading", "Paused", "Probing"):
+                        col1.setText(format_progress_size(d_size, t_size))
+                        col1.setData(Qt.ItemDataRole.UserRole, d_size)
+                    elif t_size > 0:
+                        col1.setText(format_size(t_size))
+                        col1.setData(Qt.ItemDataRole.UserRole, t_size)
 
             if status == "Completed":
                 prog = self.table.cellWidget(row, 2)
                 if isinstance(prog, QProgressBar):
                     prog.setValue(100)
-                self.table.item(row, 3).setText("--")
-                self.table.item(row, 4).setText("0 sn")
+                col3 = self.table.item(row, 3)
+                if col3:
+                    col3.setText("--")
+                    col3.setData(Qt.ItemDataRole.UserRole, 0)
+                col4 = self.table.item(row, 4)
+                if col4:
+                    col4.setText("0 sn")
+                    col4.setData(Qt.ItemDataRole.UserRole, 0)
+
+                # Sound notification on completion
+                if bool(self.db.get_setting("sound_notifications", True)):
+                    play_completion_sound()
+
                 if rec:
                     toast_en = bool(self.db.get_setting("toast_notifications", True))
                     if toast_en:
@@ -526,6 +838,37 @@ class MainWindow(QMainWindow):
                             save_path=rec.get("save_path", ""),
                             is_video=is_vid
                         )
+
+                    # Auto-open on completion
+                    if rec.get("auto_open"):
+                        spath = rec.get("save_path", "")
+                        if spath and os.path.exists(spath):
+                            try:
+                                os.startfile(os.path.abspath(spath))
+                            except Exception as e:
+                                print(f"[AutoOpen] Could not open {spath}: {e}")
+
+                    # Auto-extract archives on completion
+                    auto_extract_global = bool(self.db.get_setting("auto_extract_archives", False))
+                    auto_extract_task = bool(rec.get("auto_extract", 0))
+                    if auto_extract_global or auto_extract_task:
+                        spath = rec.get("save_path", "")
+                        if spath and os.path.exists(spath) and is_archive_file(spath):
+                            def _on_extracted(success: bool, msg: str, f_name=rec["filename"]):
+                                if success:
+                                    self.statusBar().showMessage(f"📦 Arşiv başarıyla çıkartıldı: {f_name}", 5000)
+                                    self.tray.showMessage("Arşiv Çıkartıldı", f"{f_name} başarıyla klasöre açıldı.", QSystemTrayIcon.MessageIcon.Information, 3500)
+                                else:
+                                    print(f"[AutoExtract] Error extracting {f_name}: {msg}")
+                            extract_archive_async(spath, callback=_on_extracted)
+
+                # Refresh disk space indicator on completion
+                self._update_disk_space_ui()
+
+            elif status == "Error":
+                # Sound notification on error
+                if bool(self.db.get_setting("sound_notifications", True)):
+                    play_error_sound()
 
         if download_id in self.active_dialogs:
             self.active_dialogs[download_id].update_status(status, err)
@@ -559,6 +902,8 @@ class MainWindow(QMainWindow):
             initial_quality=quality,
             base_download_dir=default_dir,
             auto_categorize=auto_cat,
+            site_rules=self.site_rules_mgr,
+            db=self.db,
             parent=self
         )
         dlg.download_confirmed.connect(self._on_download_confirmed)
@@ -583,6 +928,18 @@ class MainWindow(QMainWindow):
             return
 
         if start_immediately:
+            # Duplicate check
+            if self.db.get_duplicate_warning_setting():
+                dup = self.db.find_duplicate_download(url=url, filename=candidate_filename)
+                if dup:
+                    dlg_dup = DuplicateDownloadDialog(dup, current_url=url, parent=self)
+                    if dlg_dup.exec():
+                        act = dlg_dup.get_action()
+                        if act in (DuplicateDownloadDialog.ACTION_CANCEL, DuplicateDownloadDialog.ACTION_OPEN_EXISTING):
+                            return
+                    else:
+                        return
+
             # Add directly to queue with user's default settings
             default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
             conns = int(self.db.get_setting("connections", 8))
@@ -620,6 +977,8 @@ class MainWindow(QMainWindow):
             initial_filename=initial_filename,
             base_download_dir=default_dir,
             auto_categorize=auto_cat,
+            site_rules=self.site_rules_mgr,
+            db=self.db,
             parent=self
         )
         dlg.download_confirmed.connect(self._on_download_confirmed)
@@ -658,7 +1017,8 @@ class MainWindow(QMainWindow):
                 connections=item.get("connections", 8),
                 quality=item.get("quality", "max"),
                 headers=item.get("headers"),
-                start_now=start_now
+                start_now=start_now,
+                tags=item.get("tags", "")
             )
             added_ids.append(did)
             if not first_id:
@@ -675,6 +1035,7 @@ class MainWindow(QMainWindow):
             msg = f"{total_added} video indirme kuyruğuna eklendi (Daha sonra indirilmek üzere)."
             self.statusBar().showMessage(msg, 5000)
             self.tray.showMessage("Kuyruğa Eklendi", msg, QSystemTrayIcon.MessageIcon.Information, 3000)
+        self._refresh_tags_tree()
 
     def _on_download_confirmed(self, data: dict):
         did = self.queue_mgr.add_download(
@@ -684,8 +1045,15 @@ class MainWindow(QMainWindow):
             connections=data["connections"],
             quality=data.get("quality", "max"),
             headers=data.get("headers"),
-            start_now=data["start_now"]
+            start_now=data["start_now"],
+            auto_open=data.get("auto_open", False),
+            auto_extract=data.get("auto_extract", False),
+            priority=data.get("priority", "normal"),
+            tags=data.get("tags", ""),
+            queue_id=data.get("queue_id", "default")
         )
+        self._refresh_tags_tree()
+        self._refresh_queues_tree()
         if data["start_now"]:
             self._open_progress_dialog(did)
 
@@ -695,7 +1063,7 @@ class MainWindow(QMainWindow):
             self.active_dialogs[download_id].raise_()
             return
 
-        rec = self.db.get_download(download_id)
+        rec = self.queue_mgr.get_download(download_id)
         if not rec:
             return
 
@@ -703,11 +1071,19 @@ class MainWindow(QMainWindow):
         active_dl = self.queue_mgr.get_downloader(download_id)
         current_limit = active_dl.speed_limiter.get_limit() if active_dl else self.queue_mgr.global_speed_limit_bps
 
-        dlg = ProgressDialog(download_id, rec["filename"], rec["save_path"], initial_speed_limit=current_limit, parent=self)
+        dlg = ProgressDialog(
+            download_id,
+            rec["filename"],
+            rec["save_path"],
+            initial_speed_limit=current_limit,
+            initial_auto_open=bool(rec.get("auto_open", False)),
+            parent=self
+        )
         dlg.pause_requested.connect(self.queue_mgr.pause_download)
         dlg.resume_requested.connect(self.queue_mgr.resume_download)
         dlg.cancel_requested.connect(self.queue_mgr.cancel_download)
         dlg.speed_limit_changed.connect(self._handle_single_task_speed_limit)
+        dlg.auto_open_changed.connect(lambda did, chk: self.db.update_download(did, auto_open=1 if chk else 0))
 
         self.active_dialogs[download_id] = dlg
         dlg.show()
@@ -717,7 +1093,7 @@ class MainWindow(QMainWindow):
         if not item:
             return
         download_id = item.data(Qt.ItemDataRole.UserRole)
-        rec = self.db.get_download(download_id)
+        rec = self.queue_mgr.get_download(download_id)
         if not rec:
             return
 
@@ -808,7 +1184,7 @@ class MainWindow(QMainWindow):
         did = self._get_selected_download_id()
         if not did:
             return
-        rec = self.db.get_download(did)
+        rec = self.queue_mgr.get_download(did)
         if rec and os.path.exists(rec["save_path"]):
             os.startfile(rec["save_path"])
         else:
@@ -818,13 +1194,286 @@ class MainWindow(QMainWindow):
         did = self._get_selected_download_id()
         if not did:
             return
-        rec = self.db.get_download(did)
+        rec = self.queue_mgr.get_download(did)
         if rec:
-            folder = os.path.dirname(rec["save_path"])
-            if os.path.exists(folder):
-                subprocess.Popen(f'explorer /select,"{os.path.abspath(rec["save_path"])}"')
+            save_path = rec["save_path"]
+            folder = os.path.dirname(save_path)
+            if os.path.exists(save_path) or os.path.exists(folder):
+                show_in_explorer(save_path)
             else:
                 QMessageBox.warning(self, "Uyarı", "Klasör bulunamadı.")
+
+    def _open_checksum_dialog(self, download_id: str):
+        rec = self.queue_mgr.get_download(download_id)
+        if not rec:
+            return
+        spath = rec.get("save_path", "")
+        if not spath or not os.path.exists(spath):
+            QMessageBox.warning(self, "Uyarı", "Dosya disk üzerinde bulunamadı veya henüz indirilmedi.")
+            return
+
+        dlg = ChecksumDialog(spath, parent=self)
+        dlg.exec()
+
+    def _open_properties_dialog(self, download_id: str):
+        rec = self.queue_mgr.get_download(download_id)
+        if not rec:
+            return
+        dlg = DownloadPropertiesDialog(rec, parent=self)
+        dlg.exec()
+
+    def _show_batch_add_dialog(self, initial_text: str = ""):
+        default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
+        conns = int(self.db.get_setting("connections", 8))
+        quality = self.db.get_setting("preferred_quality", "max")
+        auto_cat = bool(self.db.get_setting("auto_categorize", True))
+
+        dlg = BatchAddDialog(
+            base_download_dir=default_dir,
+            default_connections=conns,
+            default_quality=quality,
+            auto_categorize=auto_cat,
+            initial_text=initial_text,
+            site_rules=self.site_rules_mgr,
+            parent=self
+        )
+        dlg.batch_download_confirmed.connect(self._on_batch_add_confirmed)
+        dlg.exec()
+
+    def _on_batch_add_confirmed(self, items: list, start_now: bool):
+        if not items:
+            return
+
+        added_ids = []
+        first_id = None
+        for item in items:
+            did = self.queue_mgr.add_download(
+                url=item["url"],
+                save_dir=item["save_dir"],
+                filename=item["filename"],
+                connections=item.get("connections", 8),
+                quality=item.get("quality", "max"),
+                headers=item.get("headers"),
+                start_now=start_now,
+                priority=item.get("priority", "normal"),
+                tags=item.get("tags", "")
+            )
+            added_ids.append(did)
+            if not first_id:
+                first_id = did
+
+        total = len(added_ids)
+        self._refresh_tags_tree()
+        if start_now:
+            msg = f"{total} adet bağlantı toplu olarak indirme kuyruğuna alındı ve sırayla başlatıldı."
+            self.statusBar().showMessage(msg, 5000)
+            self.tray.showMessage("Toplu İndirme Başlatıldı", msg, QSystemTrayIcon.MessageIcon.Information, 3500)
+            if first_id:
+                self._open_progress_dialog(first_id)
+        else:
+            msg = f"{total} adet bağlantı indirme kuyruğuna eklendi."
+            self.statusBar().showMessage(msg, 5000)
+            self.tray.showMessage("Kuyruğa Eklendi", msg, QSystemTrayIcon.MessageIcon.Information, 3000)
+
+        self._load_downloads_to_table()
+
+    def _export_downloads_list(self, selected_ids: Optional[List[str]] = None):
+        """Export all or selected downloads to a .txt or .json file."""
+        if selected_ids:
+            records = [self.queue_mgr.get_download(did) for did in selected_ids]
+            records = [r for r in records if r]
+        else:
+            records = self.queue_mgr.get_all_downloads()
+
+        if not records:
+            QMessageBox.information(self, "Bilgi", "Dışa aktarılacak herhangi bir indirme bulunamadı.")
+            return
+
+        path, flt = QFileDialog.getSaveFileName(
+            self,
+            "İndirme Listesini Dışa Aktar",
+            os.path.join(os.path.expanduser("~"), "Documents", "ripsync_downloads.txt"),
+            "Metin Dosyası (*.txt);;JSON Dosyası (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            if path.endswith(".json") or "JSON" in flt:
+                import json
+                clean_records = []
+                for r in records:
+                    clean_records.append({
+                        "url": r.get("url"),
+                        "filename": r.get("filename"),
+                        "status": r.get("status"),
+                        "save_path": r.get("save_path"),
+                        "total_size": r.get("total_size"),
+                        "date_added": r.get("date_added")
+                    })
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(clean_records, f, indent=2, ensure_ascii=False)
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    for r in records:
+                        url = r.get("url", "").strip()
+                        if url:
+                            f.write(url + "\n")
+
+            QMessageBox.information(self, "Başarılı", f"{len(records)} adet indirme bağlantısı başarıyla dışa aktarıldı:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Hata", f"Dışa aktarma başarısız:\n{str(e)}")
+
+    def _import_downloads_list(self):
+        """Import download URLs from a .txt or .json file and launch Batch Add Dialog."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "İçe Aktarılacak Dosyayı Seç",
+            os.path.expanduser("~"),
+            "Metin / JSON Dosyaları (*.txt *.json *.m3u *.m3u8);;Tüm Dosyalar (*.*)"
+        )
+        if not path or not os.path.exists(path):
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+
+            urls = extract_valid_urls(content)
+            if not urls:
+                QMessageBox.warning(self, "Uyarı", "Seçilen dosyada geçerli bir indirme bağlantısı bulunamadı.")
+                return
+
+            self._show_batch_add_dialog(initial_text="\n".join(urls))
+        except Exception as e:
+            QMessageBox.critical(self, "Hata", f"Dosya okunamadı:\n{str(e)}")
+
+    def _apply_search_and_filter(self):
+        query = self.edit_search.text().strip().lower() if hasattr(self, "edit_search") else ""
+        active_chip = "all"
+        if hasattr(self, "filter_btn_group"):
+            for chip_id, btn in self.filter_btn_group.items():
+                if btn.isChecked():
+                    active_chip = chip_id
+                    break
+
+        visible_count = 0
+        total_count = self.table.rowCount()
+
+        for r in range(total_count):
+            item_name = self.table.item(r, 0)
+            item_status = self.table.item(r, 5)
+            if not item_name:
+                continue
+
+            name = item_name.text().lower()
+            did = item_name.data(Qt.ItemDataRole.UserRole)
+            rec = self.queue_mgr.get_download(did) if did else None
+            url = (rec.get("url", "") if rec else "").lower()
+            raw_status = item_status.data(Qt.ItemDataRole.UserRole) if item_status else (rec.get("status", "") if rec else "")
+            status = item_status.text() if item_status else (rec.get("status", "") if rec else "")
+
+            # Filter by chip
+            status_match = True
+            if active_chip != "all":
+                if active_chip == "Downloading":
+                    status_match = raw_status in ("Downloading", "Probing", "Retrying") or status in ("Downloading", "Probing", "Retrying")
+                elif active_chip == "Completed":
+                    status_match = raw_status == "Completed" or status in ("Completed", "⚠️ Dosya Eksik")
+                else:
+                    status_match = (raw_status == active_chip) or (status == active_chip)
+
+            # Filter by search query
+            query_match = True
+            if query:
+                query_match = (query in name) or (query in url)
+
+            # Filter by size
+            size_match = True
+            if hasattr(self, "combo_size_filter"):
+                sz_filter = self.combo_size_filter.currentData()
+                if sz_filter and sz_filter != "all":
+                    item_sz = self.table.item(r, 1)
+                    raw_bytes = item_sz.data(Qt.ItemDataRole.UserRole) if item_sz else 0
+                    if not isinstance(raw_bytes, (int, float)):
+                        raw_bytes = 0
+                    if sz_filter == "small":
+                        size_match = raw_bytes < 50 * 1024 * 1024
+                    elif sz_filter == "medium":
+                        size_match = (50 * 1024 * 1024 <= raw_bytes < 500 * 1024 * 1024)
+                    elif sz_filter == "large":
+                        size_match = (500 * 1024 * 1024 <= raw_bytes < 2 * 1024 * 1024 * 1024)
+                    elif sz_filter == "huge":
+                        size_match = raw_bytes >= 2 * 1024 * 1024 * 1024
+
+            # Filter by date
+            date_match = True
+            if hasattr(self, "combo_date_filter"):
+                dt_filter = self.combo_date_filter.currentData()
+                if dt_filter and dt_filter != "all":
+                    item_dt_w = self.table.item(r, 6)
+                    date_str = item_dt_w.text() if item_dt_w else ""
+                    if date_str:
+                        try:
+                            item_dt = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+                            now_date = datetime.now().date()
+                            diff_days = (now_date - item_dt).days
+                            if dt_filter == "today":
+                                date_match = (diff_days == 0)
+                            elif dt_filter == "yesterday":
+                                date_match = (diff_days == 1)
+                            elif dt_filter == "week":
+                                date_match = (diff_days <= 7)
+                            elif dt_filter == "older":
+                                date_match = (diff_days > 7)
+                        except Exception:
+                            date_match = True
+
+            # Filter by tag
+            tag_match = True
+            if getattr(self, "current_tag", None):
+                rec_tags = (rec.get("tags", "") if rec else "").lower()
+                tag_match = bool(self.current_tag.lower() in rec_tags)
+
+            # Filter by queue
+            queue_match = True
+            if getattr(self, "current_queue_id", None):
+                rec_qid = (rec.get("queue_id", "default") if rec else "default") or "default"
+                queue_match = (rec_qid == self.current_queue_id)
+
+            should_show = status_match and query_match and size_match and date_match and tag_match and queue_match
+            self.table.setRowHidden(r, not should_show)
+            if should_show:
+                visible_count += 1
+
+        if hasattr(self, "lbl_filter_count"):
+            self.lbl_filter_count.setText(f"{visible_count} / {total_count}")
+
+    def _on_filter_chip_clicked(self, clicked_chip: str):
+        for chip_id, btn in self.filter_btn_group.items():
+            btn.blockSignals(True)
+            btn.setChecked(chip_id == clicked_chip)
+            btn.blockSignals(False)
+        self._apply_search_and_filter()
+
+    def _clear_search(self):
+        if hasattr(self, "edit_search"):
+            self.edit_search.clear()
+            self._apply_search_and_filter()
+
+    def _on_speed_decay_tick(self):
+        active_cnt = len([d for d in self.queue_mgr.active_downloaders.values() if d.status in ("Downloading", "Probing", "Retrying")])
+        if active_cnt == 0:
+            if hasattr(self, "speed_graph"):
+                self.speed_graph.add_speed_sample(0.0)
+            if hasattr(self, "lbl_speed_stat"):
+                self.lbl_speed_stat.setText("Toplam Hız: 0 KB/s")
+
+        if not hasattr(self, "_disk_tick_count"):
+            self._disk_tick_count = 0
+        self._disk_tick_count += 1
+        if self._disk_tick_count % 5 == 0:
+            self._update_disk_space_ui()
 
     def _on_start_all(self):
         self.queue_mgr.start_queue()
@@ -945,6 +1594,19 @@ class MainWindow(QMainWindow):
             else:
                 dlg.chk_limit.setChecked(False)
 
+    def _set_download_priority(self, download_id: str, priority: str):
+        self.queue_mgr.set_download_priority(download_id, priority)
+        p_names = {"high": "Yüksek (🚀)", "normal": "Normal (⚖️)", "low": "Düşük (🐢)"}
+        self.statusBar().showMessage(f"Öncelik güncellendi: {p_names.get(priority, priority)}", 3000)
+        self._load_downloads_to_table()
+
+    def _set_bulk_priority(self, download_ids: List[str], priority: str):
+        for did in download_ids:
+            self.queue_mgr.set_download_priority(did, priority)
+        p_names = {"high": "Yüksek (🚀)", "normal": "Normal (⚖️)", "low": "Düşük (🐢)"}
+        self.statusBar().showMessage(f"{len(download_ids)} indirme önceliği güncellendi: {p_names.get(priority, priority)}", 3000)
+        self._load_downloads_to_table()
+
     def _show_settings_dialog(self):
         dlg = SettingsDialog(self.db, self)
         if dlg.exec():
@@ -970,8 +1632,21 @@ class MainWindow(QMainWindow):
                 self.combo_tb_queue_action.blockSignals(False)
             self.tray.update_queue_action_ui(self.current_queue_action)
 
-            clip_en = self.db.get_setting("clipboard_enabled", True)
-            self.clip_monitor.set_enabled(bool(clip_en))
+            clip_cfg = self.db.get_clipboard_settings()
+            self.clip_monitor.configure(
+                enabled=bool(clip_cfg.get("enabled", True)),
+                only_media=bool(clip_cfg.get("only_media", False)),
+                ignore_domains=clip_cfg.get("ignore_domains")
+            )
+
+            # Apply appearance / theme dynamically
+            thm_cfg = self.db.get_theme_settings()
+            app = QApplication.instance()
+            sheet = get_theme_stylesheet(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue"))
+            if app:
+                app.setStyleSheet(sheet)
+            else:
+                self.setStyleSheet(sheet)
 
     def _show_extension_guide(self):
         port = int(self.db.get_setting("extension_port", 28710))
@@ -984,7 +1659,7 @@ class MainWindow(QMainWindow):
         if not item:
             return
         did = self.table.item(item.row(), 0).data(Qt.ItemDataRole.UserRole)
-        rec = self.db.get_download(did)
+        rec = self.queue_mgr.get_download(did)
         if not rec:
             return
 
@@ -1012,6 +1687,29 @@ class MainWindow(QMainWindow):
             act_stop_bulk.triggered.connect(self._cancel_selected)
 
             menu.addSeparator()
+            act_export_bulk = menu.addAction(f"📤 Seçilenleri Dışa Aktar ({count})")
+            act_export_bulk.triggered.connect(lambda: self._export_downloads_list(selected_ids=selected_ids))
+
+            menu.addSeparator()
+            menu_prio_bulk = menu.addMenu(f"⚖️ Bant Genişliği Önceliği ({count})")
+            act_bh = menu_prio_bulk.addAction("🚀 Yüksek Öncelik (%70 Hız Payı)")
+            act_bh.triggered.connect(lambda: self._set_bulk_priority(selected_ids, "high"))
+            act_bn = menu_prio_bulk.addAction("⚖️ Normal Öncelik (Dengeli)")
+            act_bn.triggered.connect(lambda: self._set_bulk_priority(selected_ids, "normal"))
+            act_bl = menu_prio_bulk.addAction("🐢 Düşük Öncelik (Arka Plan - %10)")
+            act_bl.triggered.connect(lambda: self._set_bulk_priority(selected_ids, "low"))
+
+            menu.addSeparator()
+            act_tags_bulk = menu.addAction(f"🏷️ Seçilenlere Etiket Ata ({count})...")
+            act_tags_bulk.triggered.connect(lambda: self._edit_bulk_tags(selected_ids))
+
+            menu.addSeparator()
+            menu_queue_bulk = menu.addMenu(f"🗂️ Seçilenleri Kuyruğa Taşı ({count})")
+            for q in self.db.get_all_queues():
+                act_mq = menu_queue_bulk.addAction(f"🗂️ {q['name']}")
+                act_mq.triggered.connect(lambda checked, qid=q["id"], dids=selected_ids: self._move_downloads_to_queue(dids, qid))
+
+            menu.addSeparator()
             act_del_bulk = menu.addAction(f"🗑 Seçilenleri Listeden Kaldır ({count})")
             act_del_bulk.triggered.connect(self._delete_selected)
 
@@ -1021,7 +1719,7 @@ class MainWindow(QMainWindow):
             menu.exec(self.table.viewport().mapToGlobal(pos))
             return
 
-        if status in ("Downloading", "Probing"):
+        if status in ("Downloading", "Probing", "Retrying"):
             act = menu.addAction("⏸ Duraklat")
             act.triggered.connect(lambda: self.queue_mgr.pause_download(did))
         else:
@@ -1031,15 +1729,22 @@ class MainWindow(QMainWindow):
         act_prog = menu.addAction("📊 İlerleme Detayı (IDM Segment Penceresi)")
         act_prog.triggered.connect(lambda: self._open_progress_dialog(did))
 
-        # Queue reordering options if Queued
-        if status == "Queued":
+        # Queue reordering options if Queued or Paused
+        if status in ("Queued", "Paused"):
             menu_queue = menu.addMenu("📋 Kuyruk Sırası (Öncelik)")
-            act_up = menu_queue.addAction("⬆ Kuyrukta Yukarı Taşı")
+            act_up = menu_queue.addAction("⬆ Kuyrukta Bir Yukarı Taşı (Ctrl+Yukarı)")
             act_up.triggered.connect(lambda: self._move_download_order(did, "up"))
-            act_down = menu_queue.addAction("⬇ Kuyrukta Aşağı Taşı")
+            act_down = menu_queue.addAction("⬇ Kuyrukta Bir Aşağı Taşı (Ctrl+Aşağı)")
             act_down.triggered.connect(lambda: self._move_download_order(did, "down"))
-            act_top = menu_queue.addAction("⚡ Kuyruğun Başına Al")
+            act_top = menu_queue.addAction("⏫ En Başa Al (Öncelikli)")
             act_top.triggered.connect(lambda: self._move_download_order(did, "top"))
+            act_bottom = menu_queue.addAction("⏬ En Sona Gönder")
+            act_bottom.triggered.connect(lambda: self._move_download_order(did, "bottom"))
+
+        act_auto_open = menu.addAction("🏁 İndirme Tamamlandığında Otomatik Aç")
+        act_auto_open.setCheckable(True)
+        act_auto_open.setChecked(bool(rec.get("auto_open", False)))
+        act_auto_open.toggled.connect(lambda chk, d=did: self._toggle_download_auto_open(d, chk))
 
         # Speed Limiter Submenu for selected item (IDM style single-click limit)
         menu_limiter = menu.addMenu("⚡ Hız Sınırı (Speed Limiter)")
@@ -1059,14 +1764,69 @@ class MainWindow(QMainWindow):
             act_preset = menu_limiter.addAction(f"⏱ {label}")
             act_preset.triggered.connect(lambda checked, k=kb_val: self._set_single_download_speed_limit(did, k))
 
+        # Bandwidth Priority Submenu (Feature 5)
+        curr_prio = (rec.get("priority") or "normal").lower()
+        menu_prio = menu.addMenu("⚖️ Bant Genişliği Önceliği")
+
+        act_prio_high = menu_prio.addAction("🚀 Yüksek Öncelik (%70 Hız Payı)")
+        act_prio_high.setCheckable(True)
+        act_prio_high.setChecked(curr_prio == "high")
+        act_prio_high.triggered.connect(lambda: self._set_download_priority(did, "high"))
+
+        act_prio_norm = menu_prio.addAction("⚖️ Normal Öncelik (Dengeli Paylaşım)")
+        act_prio_norm.setCheckable(True)
+        act_prio_norm.setChecked(curr_prio == "normal")
+        act_prio_norm.triggered.connect(lambda: self._set_download_priority(did, "normal"))
+
+        act_prio_low = menu_prio.addAction("🐢 Düşük Öncelik (Arka Plan - %10 Hız Payı)")
+        act_prio_low.setCheckable(True)
+        act_prio_low.setChecked(curr_prio == "low")
+        act_prio_low.triggered.connect(lambda: self._set_download_priority(did, "low"))
+
         menu.addSeparator()
 
         if status == "Completed":
             act_open = menu.addAction("📂 Dosyayı Aç")
             act_open.triggered.connect(self._open_selected_file)
 
+            act_checksum = menu.addAction("🛡️ Dosya Bütünlüğünü Doğrula (Hash / Checksum)")
+            act_checksum.triggered.connect(lambda: self._open_checksum_dialog(did))
+
+            spath = rec.get("save_path", "")
+            if spath and is_archive_file(spath):
+                act_extract = menu.addAction("📦 Arşivi Buraya Çıkart")
+                act_extract.triggered.connect(lambda: self._extract_selected_archive(did))
+
         act_folder = menu.addAction("📁 Klasörde Göster")
         act_folder.triggered.connect(self._open_selected_folder)
+
+        act_props = menu.addAction("ℹ️ İndirme Özellikleri (Properties)")
+        act_props.triggered.connect(lambda: self._open_properties_dialog(did))
+
+        act_edit_tags = menu.addAction("🏷️ Etiketleri Düzenle...")
+        act_edit_tags.triggered.connect(lambda: self._edit_download_tags(did))
+
+        menu_move_queue = menu.addMenu("🗂️ Kuyruğa Taşı")
+        for q in self.db.get_all_queues():
+            act_mq = menu_move_queue.addAction(f"🗂️ {q['name']}")
+            act_mq.triggered.connect(lambda checked, qid=q["id"], d=did: self._move_downloads_to_queue([d], qid))
+
+        if status in ("Paused", "Error", "Cancelled"):
+            act_refresh = menu.addAction("🔄 Bağlantı Adresini Yenile (Refresh URL)")
+            act_refresh.triggered.connect(lambda: self._show_refresh_url_dialog(did))
+
+        menu.addSeparator()
+
+        act_clean_missing = menu.addAction("🧹 Eksik Dosyaları Listeden Temizle")
+        act_clean_missing.triggered.connect(self._clean_missing_files)
+
+        menu.addSeparator()
+
+        act_export = menu.addAction("📤 İndirme Listesini Dışa Aktar (.txt / .json)")
+        act_export.triggered.connect(lambda: self._export_downloads_list())
+
+        act_import = menu.addAction("📥 Bağlantıları İçe Aktar (.txt)")
+        act_import.triggered.connect(self._import_downloads_list)
 
         menu.addSeparator()
 
@@ -1077,6 +1837,82 @@ class MainWindow(QMainWindow):
         act_del_all.triggered.connect(self._delete_selected_with_files)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _show_refresh_url_dialog(self, download_id: str):
+        rec = self.queue_mgr.get_download(download_id)
+        if not rec:
+            return
+        dlg = RefreshUrlDialog(rec, parent=self)
+        dlg.url_refreshed.connect(self._on_url_refreshed)
+        dlg.exec()
+
+    def _on_url_refreshed(self, download_id: str, new_url: str, new_headers: dict):
+        ok = self.queue_mgr.update_download_url(download_id, new_url, new_headers)
+        if ok:
+            self._load_downloads_to_table()
+            reply = QMessageBox.question(
+                self,
+                "Bağlantı Güncellendi",
+                "İndirme adresi başarıyla yenilendi.\n\nİndirme kaldığı yerden şimdi devam ettirilsin mi?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.queue_mgr.resume_download(download_id)
+                self._open_progress_dialog(download_id)
+        else:
+            QMessageBox.critical(self, "Hata", "Bağlantı adresi güncellenemedi.")
+
+    def _clean_missing_files(self):
+        """Finds completed downloads whose files no longer exist on disk and offers to remove them from history."""
+        all_dls = self.queue_mgr.get_all_downloads()
+        missing = []
+        for dl in all_dls:
+            if dl.get("status") == "Completed":
+                spath = dl.get("save_path", "")
+                if spath and not os.path.exists(spath):
+                    missing.append(dl)
+
+        if not missing:
+            QMessageBox.information(self, "Bilgi", "Diskte eksik olan herhangi bir dosya bulunamadı.\nTüm tamamlanmış dosyalar disk üzerinde mevcuttur.")
+            return
+
+        sample_names = "\n".join(f"• {m.get('filename')}" for m in missing[:5])
+        if len(missing) > 5:
+            sample_names += f"\n... ve {len(missing) - 5} adet daha"
+
+        reply = QMessageBox.question(
+            self,
+            "Eksik Dosyaları Temizle",
+            f"Diskte artık bulunamayan {len(missing)} adet tamamlanmış dosya tespit edildi:\n\n{sample_names}\n\nBu kayıtları indirme geçmişinden temizlemek istiyor musunuz?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            for m in missing:
+                self.queue_mgr.delete_download(m["id"], delete_file=False)
+            self._load_downloads_to_table()
+            self.statusBar().showMessage(f"🧹 {len(missing)} adet eksik dosya kaydı listeden temizlendi.", 4000)
+
+    def _extract_selected_archive(self, download_id: str):
+        rec = self.queue_mgr.get_download(download_id)
+        if not rec:
+            return
+        spath = rec.get("save_path", "")
+        if not spath or not os.path.exists(spath):
+            QMessageBox.warning(self, "Uyarı", "Arşiv dosyası disk üzerinde bulunamadı.")
+            return
+        if not is_archive_file(spath):
+            QMessageBox.warning(self, "Uyarı", "Seçilen dosya desteklenen bir arşiv formatında (.zip, .tar vb.) değil.")
+            return
+
+        self.statusBar().showMessage(f"📦 Arşiv çıkartılıyor: {rec['filename']}...", 5000)
+        def _cb(success: bool, msg: str):
+            if success:
+                self.statusBar().showMessage(f"📦 {rec['filename']} başarıyla çıkartıldı.", 5000)
+                QMessageBox.information(self, "Arşiv Çıkartıldı", msg)
+            else:
+                QMessageBox.warning(self, "Hata", msg)
+
+        extract_archive_async(spath, callback=_cb)
 
     def _delete_with_file(self, download_id: Optional[str] = None):
         if download_id:
@@ -1092,23 +1928,205 @@ class MainWindow(QMainWindow):
         else:
             self._delete_selected_with_files()
 
+    def _refresh_tags_tree(self):
+        if not hasattr(self, "root_tags"):
+            return
+        while self.root_tags.childCount() > 0:
+            self.root_tags.removeChild(self.root_tags.child(0))
+
+        all_tags = self.db.get_all_tags()
+        if not all_tags:
+            item_none = QTreeWidgetItem(["  (Henüz etiket yok)"])
+            item_none.setData(0, Qt.ItemDataRole.UserRole, "")
+            self.root_tags.addChild(item_none)
+        else:
+            for t in all_tags:
+                t_item = QTreeWidgetItem([f"🏷️ {t}"])
+                t_item.setData(0, Qt.ItemDataRole.UserRole, f"tag:{t}")
+                self.root_tags.addChild(t_item)
+
+    def _refresh_queues_tree(self):
+        if not hasattr(self, "root_queues"):
+            return
+        while self.root_queues.childCount() > 0:
+            self.root_queues.removeChild(self.root_queues.child(0))
+
+        queues = self.db.get_all_queues()
+        for q in queues:
+            cnt = len(self.db.get_all_downloads(queue_id=q["id"]))
+            item = QTreeWidgetItem([f"🗂️ {q['name']} ({cnt})"])
+            item.setData(0, Qt.ItemDataRole.UserRole, f"queue:{q['id']}")
+            self.root_queues.addChild(item)
+
+        item_add = QTreeWidgetItem(["  ➕ Yeni Kuyruk Oluştur..."])
+        item_add.setData(0, Qt.ItemDataRole.UserRole, "__ADD_QUEUE__")
+        self.root_queues.addChild(item_add)
+
+    def _create_new_queue_dialog(self):
+        name, ok = QInputDialog.getText(self, "Yeni İndirme Kuyruğu", "Kuyruk Adı:")
+        if ok and name.strip():
+            self.db.add_queue(name.strip())
+            self._refresh_queues_tree()
+            self.statusBar().showMessage(f"🗂️ '{name.strip()}' kuyruğu oluşturuldu.", 3500)
+
+    def _delete_queue(self, queue_id: str):
+        if queue_id == "default":
+            QMessageBox.warning(self, "Uyarı", "Varsayılan 'Ana Kuyruk' silinemez.")
+            return
+        q_info = self.db.get_queue(queue_id)
+        q_name = q_info.get("name", "Kuyruk") if q_info else "Kuyruk"
+        reply = QMessageBox.question(
+            self,
+            "Kuyruğu Sil",
+            f"'{q_name}' kuyruğunu silmek istiyor musunuz?\nBu kuyruktaki indirmeler 'Ana Kuyruk' içine aktarılacaktır.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.db.delete_queue(queue_id)
+            self._refresh_queues_tree()
+            self._load_downloads_to_table()
+            self.statusBar().showMessage(f"Kuyruk silindi: {q_name}", 3500)
+
+    def _move_downloads_to_queue(self, download_ids: List[str], queue_id: str):
+        for did in download_ids:
+            self.db.move_download_to_queue(did, queue_id)
+        q_info = self.db.get_queue(queue_id)
+        q_name = q_info.get("name", "Kuyruk") if q_info else "Kuyruk"
+        self.statusBar().showMessage(f"{len(download_ids)} indirme '{q_name}' kuyruğuna taşındı.", 3500)
+        self._refresh_queues_tree()
+        self._load_downloads_to_table()
+
+    def _show_categories_tree_context_menu(self, pos):
+        item = self.tree_categories.itemAt(pos)
+        if not item:
+            return
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if not key:
+            return
+        if key.startswith("queue:"):
+            qid = key[6:]
+            q_info = self.db.get_queue(qid)
+            q_name = q_info.get("name", "Kuyruk") if q_info else "Kuyruk"
+
+            menu = QMenu(self)
+            menu.addAction(f"🗂️ {q_name}").setEnabled(False)
+            menu.addSeparator()
+
+            act_start = menu.addAction("▶ Bu Kuyruğu Başlat")
+            act_start.triggered.connect(lambda: self.queue_mgr.start_queue(queue_id=qid))
+
+            act_pause = menu.addAction("⏸ Bu Kuyruğu Duraklat")
+            act_pause.triggered.connect(lambda: self.queue_mgr.pause_queue(queue_id=qid))
+
+            if qid != "default":
+                menu.addSeparator()
+                act_del = menu.addAction("🗑️ Bu Kuyruğu Sil")
+                act_del.triggered.connect(lambda: self._delete_queue(qid))
+
+            menu.exec(self.tree_categories.viewport().mapToGlobal(pos))
+        elif key == "__QUEUES_ROOT__":
+            menu = QMenu(self)
+            act_add = menu.addAction("➕ Yeni Kuyruk Oluştur...")
+            act_add.triggered.connect(self._create_new_queue_dialog)
+            menu.exec(self.tree_categories.viewport().mapToGlobal(pos))
+
+    def _on_metered_status_changed(self, is_metered: bool):
+        metered_cfg = self.db.get_metered_settings()
+        if is_metered and metered_cfg.get("pause_on_metered", True) and not self.queue_mgr.metered_bypass:
+            self.btn_metered_stat.show()
+            self.statusBar().showMessage("📶 Tarifeli Mobil Bağlantı Algılandı (Kota Koruması Devrede)", 6000)
+        else:
+            self.btn_metered_stat.hide()
+
+    def _on_metered_blocked(self, download_id: str):
+        self.btn_metered_stat.show()
+        self.statusBar().showMessage("📶 Tarifeli bağlantı nedeniyle indirmeler bekletildi. Devam etmek için butona tıklayın.", 6000)
+        self.tray.showMessage(
+            "Tarifeli Ağ Koruması",
+            "Mobil veri / Hotspot algılandı. Kota koruması nedeniyle indirmeler bekletildi.",
+            QSystemTrayIcon.MessageIcon.Warning,
+            4000
+        )
+
+    def _on_metered_btn_clicked(self):
+        reply = QMessageBox.question(
+            self,
+            "Tarifeli Ağ Kota Koruması",
+            "Şu anda tarifeli bir mobil veri veya hotspot bağlantısındasınız.\n\n"
+            "Kota korumasını bu oturum için geçici olarak devre dışı bırakıp indirmeleri devam ettirmek istiyor musunuz?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.queue_mgr.set_metered_bypass(True)
+            self.btn_metered_stat.hide()
+            self.statusBar().showMessage("Kota koruması devre dışı bırakıldı, kuyruk devam ediyor...", 4000)
+            self.queue_mgr.start_queue()
+
+    def _edit_download_tags(self, download_id: str):
+        rec = self.queue_mgr.get_download(download_id)
+        if not rec:
+            return
+        curr_tags = rec.get("tags") or ""
+        new_tags, ok = QInputDialog.getText(
+            self,
+            "🏷️ İndirme Etiketlerini Düzenle",
+            f"'{rec.get('filename', 'Dosya')}' için etiketler (Virgülle ayırın):",
+            text=curr_tags
+        )
+        if ok:
+            clean_tags = ", ".join([t.strip() for t in new_tags.split(",") if t.strip()])
+            self.db.update_download(download_id, tags=clean_tags)
+            self._load_downloads_to_table()
+            self._refresh_tags_tree()
+
+    def _edit_bulk_tags(self, download_ids: List[str]):
+        new_tags, ok = QInputDialog.getText(
+            self,
+            "🏷️ Toplu Etiket Ata",
+            f"Seçilen {len(download_ids)} indirme için etiketler (Virgülle ayırın):"
+        )
+        if ok:
+            clean_tags = ", ".join([t.strip() for t in new_tags.split(",") if t.strip()])
+            for did in download_ids:
+                self.db.update_download(did, tags=clean_tags)
+            self._load_downloads_to_table()
+            self._refresh_tags_tree()
+
     def _on_category_changed(self, current: QTreeWidgetItem, previous: QTreeWidgetItem):
         if not current:
             return
         key = current.data(0, Qt.ItemDataRole.UserRole)
-        self.current_category = key
+        if key in ("__TAGS_ROOT__", "__QUEUES_ROOT__"):
+            return
+        if key == "__ADD_QUEUE__":
+            self._create_new_queue_dialog()
+            return
 
-        # Filter downloads
-        if key in ("Downloading", "Completed", "Paused", "Error"):
-            downloads = self.db.get_all_downloads(status=key)
-        elif key == "All":
-            downloads = self.db.get_all_downloads()
+        if key and key.startswith("tag:"):
+            self.current_tag = key[4:]
+            self.current_category = "All"
+            self.current_queue_id = None
+            downloads = self.db.get_all_downloads(tag=self.current_tag)
+        elif key and key.startswith("queue:"):
+            self.current_queue_id = key[6:]
+            self.current_tag = None
+            self.current_category = "All"
+            downloads = self.db.get_all_downloads(queue_id=self.current_queue_id)
         else:
-            downloads = self.db.get_all_downloads(category=key)
+            self.current_tag = None
+            self.current_queue_id = None
+            self.current_category = key or "All"
+            if key in ("Downloading", "Completed", "Paused", "Error"):
+                downloads = self.db.get_all_downloads(status=key)
+            elif key == "All":
+                downloads = self.db.get_all_downloads()
+            else:
+                downloads = self.db.get_all_downloads(category=key)
 
         self.table.setRowCount(0)
         for dl in downloads:
             self._add_or_update_table_row(dl)
+        self._apply_search_and_filter()
 
     def _on_toolbar_queue_action_changed(self, index: int):
         act = self.combo_tb_queue_action.currentData() or "none"
@@ -1188,9 +2206,84 @@ class MainWindow(QMainWindow):
     def _move_download_order(self, download_id: str, direction: str):
         if direction == "top":
             self.queue_mgr.move_queue_to_top(download_id)
+        elif direction == "bottom":
+            self.queue_mgr.move_queue_to_bottom(download_id)
         else:
             self.queue_mgr.reorder_queue(download_id, direction)
         self._load_downloads_to_table()
+        row = self._find_row_by_id(download_id)
+        if row >= 0:
+            self.table.selectRow(row)
+
+    def _move_selected_queue(self, direction: str):
+        dids = self._get_selected_download_ids()
+        if not dids:
+            return
+        self._move_download_order(dids[0], direction)
+
+    def _toggle_download_auto_open(self, download_id: str, enabled: bool):
+        self.db.update_download(download_id, auto_open=1 if enabled else 0)
+        if download_id in self.active_dialogs:
+            self.active_dialogs[download_id].chk_auto_open.setChecked(enabled)
+
+    def _update_disk_space_ui(self):
+        default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
+        free_bytes, total_bytes, drive = get_disk_total_and_free(default_dir)
+        if free_bytes >= 0:
+            self.lbl_disk_stat.setText(f"💾 {drive}: {format_size(free_bytes)} Boş")
+            if free_bytes < 1024 * 1024 * 1024:  # < 1 GB
+                self.lbl_disk_stat.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 15px;")
+            else:
+                self.lbl_disk_stat.setStyleSheet("color: #7dcfff; font-weight: bold; margin-left: 15px;")
+
+    def _show_statistics_dialog(self):
+        default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
+        dlg = StatisticsDialog(self.db, default_download_dir=default_dir, parent=self)
+        dlg.exec()
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = []
+        if event.mimeData().hasUrls():
+            for u in event.mimeData().urls():
+                if u.isLocalFile():
+                    local_p = u.toLocalFile()
+                    if local_p.lower().endswith(('.txt', '.json', '.m3u', '.m3u8', '.list')):
+                        try:
+                            with open(local_p, 'r', encoding='utf-8', errors='ignore') as f:
+                                extracted = extract_valid_urls(f.read())
+                                urls.extend(extracted)
+                        except Exception:
+                            pass
+                else:
+                    s = u.toString().strip()
+                    if s.startswith(('http://', 'https://')):
+                        urls.append(s)
+
+        if event.mimeData().hasText():
+            text = event.mimeData().text()
+            extracted = extract_valid_urls(text)
+            for eu in extracted:
+                if eu not in urls:
+                    urls.append(eu)
+
+        if len(urls) == 1:
+            event.acceptProposedAction()
+            self._show_add_dialog(initial_url=urls[0])
+        elif len(urls) > 1:
+            event.acceptProposedAction()
+            self._show_batch_add_dialog(initial_text="\n".join(urls))
 
     def _show_scheduler_dialog(self):
         dlg = SchedulerDialog(self.db, self.queue_mgr, self.scheduler, parent=self)

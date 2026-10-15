@@ -44,6 +44,47 @@ def execute_sleep() -> bool:
         print(f"[PowerManager] Sleep command failed: {e}")
         return False
 
+# Windows SetThreadExecutionState flags
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+ES_AWAYMODE_REQUIRED = 0x00000040
+
+_keep_awake_active = False
+_keep_awake_lock = threading.Lock()
+
+def set_keep_awake(enabled: bool) -> bool:
+    """
+    Prevents Windows from entering sleep or idle standby during active downloads.
+    When enabled=True, calls SetThreadExecutionState with ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED.
+    When enabled=False, resets the execution state to normal ES_CONTINUOUS.
+    """
+    global _keep_awake_active
+    with _keep_awake_lock:
+        try:
+            if not hasattr(ctypes, "windll") or not hasattr(ctypes.windll, "kernel32"):
+                # Non-windows platform or mock environment
+                _keep_awake_active = enabled
+                return True
+
+            kernel32 = ctypes.windll.kernel32
+            if enabled:
+                flags = ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+                prev = kernel32.SetThreadExecutionState(flags)
+                _keep_awake_active = (prev != 0)
+                return _keep_awake_active
+            else:
+                prev = kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+                _keep_awake_active = False
+                return True
+        except Exception as e:
+            print(f"[PowerManager] SetThreadExecutionState failed: {e}")
+            return False
+
+def is_keep_awake_active() -> bool:
+    """Returns True if system sleep prevention is currently active."""
+    global _keep_awake_active
+    return _keep_awake_active
+
 class PowerCountdownManager:
     """
     Manages a countdown before performing a power action (shutdown or sleep),

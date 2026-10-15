@@ -45,6 +45,7 @@ class ClipboardMonitor(QObject):
     """
     Monitors system clipboard for downloadable media or file URLs.
     Emits detected link with metadata (service name, icon, is_video, etc.).
+    Supports smart exclusion domains and only-media filtering.
     """
     # Emits (url, info_dict)
     link_detected = pyqtSignal(str, dict)
@@ -52,6 +53,8 @@ class ClipboardMonitor(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.enabled = True
+        self.only_media = False
+        self.ignore_domains = list(IGNORED_DOMAINS)
         self.last_text = ""
         self.clipboard = QApplication.clipboard()
         if self.clipboard:
@@ -59,6 +62,13 @@ class ClipboardMonitor(QObject):
 
     def set_enabled(self, val: bool):
         self.enabled = val
+
+    def configure(self, enabled: bool = True, only_media: bool = False, ignore_domains: Optional[list] = None):
+        """Configure clipboard monitoring rules."""
+        self.enabled = enabled
+        self.only_media = only_media
+        if ignore_domains is not None:
+            self.ignore_domains = list(ignore_domains)
 
     def _on_clipboard_change(self):
         if not self.enabled or not self.clipboard:
@@ -78,12 +88,12 @@ class ClipboardMonitor(QObject):
 
         self.last_text = text
 
-        info = self.analyze_url(text)
+        info = self.analyze_url(text, ignore_domains=self.ignore_domains, only_media=self.only_media)
         if info:
             self.link_detected.emit(text, info)
 
     @classmethod
-    def analyze_url(cls, url: str) -> Optional[Dict[str, Any]]:
+    def analyze_url(cls, url: str, ignore_domains: Optional[list] = None, only_media: bool = False) -> Optional[Dict[str, Any]]:
         """
         Analyze whether a URL is a downloadable file or video link.
         Returns metadata dict if valid, None otherwise.
@@ -93,7 +103,13 @@ class ClipboardMonitor(QObject):
 
         # Check ignore list
         u_lower = url.lower()
-        if any(ign in u_lower for ign in IGNORED_DOMAINS):
+        effective_ignores = set(IGNORED_DOMAINS)
+        if ignore_domains:
+            for item in ignore_domains:
+                if item and item.strip():
+                    effective_ignores.add(item.strip().lower())
+
+        if any(ign in u_lower for ign in effective_ignores):
             return None
 
         try:
@@ -154,6 +170,17 @@ class ClipboardMonitor(QObject):
                         "filename": fname
                     }
 
+                if plat_domain in ("twitter.com", "x.com"):
+                    clean_p = parsed.path.lower()
+                    if "/status/" in clean_p or "/i/status/" in clean_p:
+                        return {
+                            "is_video": True,
+                            "is_playlist": False,
+                            "service": "X (Twitter)",
+                            "icon": "𝕏",
+                            "filename": "Twitter_Video"
+                        }
+
                 return {
                     "is_video": True,
                     "is_playlist": False,
@@ -174,8 +201,15 @@ class ClipboardMonitor(QObject):
             }
 
         # 3. Check downloadable extensions
+        MEDIA_EXTENSIONS = (
+            ".mp4", ".mkv", ".avi", ".webm", ".mov", ".ts", ".m4v", ".flv",
+            ".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".wma"
+        )
         for ext in DOWNLOADABLE_EXTENSIONS:
             if clean_path.endswith(ext):
+                if only_media and ext not in MEDIA_EXTENSIONS:
+                    return None
+
                 # Extract filename
                 raw_name = clean_path.split("/")[-1]
                 try:

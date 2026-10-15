@@ -94,3 +94,133 @@ def get_icon_path() -> Optional[str]:
             return c
     return None
 
+def show_in_explorer(file_or_dir_path: str):
+    """
+    Opens Windows Explorer highlighting the file, or opening the directory.
+    """
+    import subprocess
+    try:
+        abs_path = os.path.abspath(file_or_dir_path)
+        if os.path.isfile(abs_path):
+            subprocess.Popen(f'explorer /select,"{abs_path}"')
+        elif os.path.isdir(abs_path):
+            subprocess.Popen(f'explorer "{abs_path}"')
+        else:
+            parent = os.path.dirname(abs_path)
+            if os.path.exists(parent):
+                subprocess.Popen(f'explorer "{parent}"')
+    except Exception as e:
+        print(f"[Explorer] Failed to open explorer: {e}")
+
+
+def get_disk_free_space(path: str) -> int:
+    """Returns free disk space in bytes for the volume containing path."""
+    try:
+        abs_p = os.path.abspath(path or os.path.expanduser("~"))
+        while not os.path.exists(abs_p) and os.path.dirname(abs_p) != abs_p:
+            abs_p = os.path.dirname(abs_p)
+        return shutil.disk_usage(abs_p).free
+    except Exception:
+        return -1
+
+
+def get_disk_total_and_free(path: str):
+    """Returns (free_bytes, total_bytes, drive_identifier) for the drive."""
+    try:
+        abs_p = os.path.abspath(path or os.path.expanduser("~"))
+        while not os.path.exists(abs_p) and os.path.dirname(abs_p) != abs_p:
+            abs_p = os.path.dirname(abs_p)
+        usage = shutil.disk_usage(abs_p)
+        drive = os.path.splitdrive(abs_p)[0]
+        if not drive:
+            drive = abs_p[:15]
+        return usage.free, usage.total, drive
+    except Exception:
+        return -1, -1, ""
+
+
+def sanitize_filename(candidate: str, default_name: str = "download.bin") -> str:
+    """
+    Sanitizes candidate string into a valid, safe Windows filename.
+    - Strips query parameters or hash fragments
+    - Replaces invalid Windows characters (< > : " / \\ | ? *) with '_'
+    - Trims leading/trailing spaces and dots
+    - Avoids reserved Windows device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    - Truncates long filenames to avoid MAX_PATH issues
+    """
+    import re
+    if not candidate:
+        return default_name
+
+    # If it is a full URL or has a URL query parameter attached to an extension
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        import urllib.parse
+        parsed = urllib.parse.urlparse(candidate)
+        candidate = os.path.basename(parsed.path) or default_name
+    elif "?" in candidate:
+        before_q = candidate.split("?")[0]
+        if "." in before_q and 1 <= len(before_q.rsplit(".", 1)[-1]) <= 6:
+            candidate = before_q
+
+    # Replace invalid Windows chars
+    clean = re.sub(r'[\\/*?:"<>|\x00-\x1f]', "_", candidate).strip(" .")
+
+    if not clean:
+        return default_name
+
+    # Handle reserved device names in Windows
+    reserved = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+    root, ext = os.path.splitext(clean)
+    if root.upper() in reserved:
+        clean = f"_{clean}"
+
+    # Truncate if excessively long (e.g. > 200 chars)
+    if len(clean) > 200:
+        root, ext = os.path.splitext(clean)
+        clean = root[:190] + ext
+
+    return clean or default_name
+
+
+def resolve_file_conflict(target_dir: str, filename: str, action: str = "auto_rename") -> tuple[str, bool]:
+    """
+    Resolves filename conflicts if a file already exists in target_dir.
+    :param target_dir: Directory where the file will be saved.
+    :param filename: Desired filename.
+    :param action: 'auto_rename' (default), 'overwrite', or 'skip'.
+    :return: (resolved_filename, was_conflicted)
+    """
+    clean_name = sanitize_filename(filename)
+    full_path = os.path.join(target_dir, clean_name)
+
+    if not os.path.exists(full_path):
+        return clean_name, False
+
+    # A conflict exists!
+    if action == "overwrite":
+        return clean_name, True
+
+    if action == "skip":
+        return clean_name, True
+
+    # Default: auto_rename
+    # Handle composite extensions like .tar.gz or standard .ext
+    lower_name = clean_name.lower()
+    if lower_name.endswith(".tar.gz") or lower_name.endswith(".tar.bz2"):
+        parts = clean_name.rsplit(".", 2)
+        base = parts[0]
+        ext = "." + parts[1] + "." + parts[2]
+    else:
+        base, ext = os.path.splitext(clean_name)
+
+    counter = 1
+    while True:
+        candidate = f"{base} ({counter}){ext}"
+        candidate_path = os.path.join(target_dir, candidate)
+        if not os.path.exists(candidate_path):
+            return candidate, True
+        counter += 1
+
+
+
+

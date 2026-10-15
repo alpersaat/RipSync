@@ -37,7 +37,11 @@ class DownloadScheduler:
                  stop_time: str = "07:00",
                  days: Optional[List[int]] = None,
                  on_stop_action: str = "pause_all",
-                 auto_start_if_in_window: bool = True):
+                 auto_start_if_in_window: bool = True,
+                 speed_schedule_enabled: bool = False,
+                 speed_schedule_start: str = "09:00",
+                 speed_schedule_end: str = "18:00",
+                 speed_schedule_limit_kb: int = 2048):
         self.enabled = enabled
         self.start_time_str = start_time
         self.stop_enabled = stop_enabled
@@ -45,6 +49,13 @@ class DownloadScheduler:
         self.days = days if days is not None else [0, 1, 2, 3, 4, 5, 6]
         self.on_stop_action = on_stop_action
         self.auto_start_if_in_window = auto_start_if_in_window
+
+        # Bandwidth throttling schedule
+        self.speed_schedule_enabled = speed_schedule_enabled
+        self.speed_schedule_start = speed_schedule_start
+        self.speed_schedule_end = speed_schedule_end
+        self.speed_schedule_limit_kb = speed_schedule_limit_kb
+        self._last_speed_limit_bps: Optional[int] = None
 
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
@@ -59,6 +70,7 @@ class DownloadScheduler:
         # Callbacks
         self.on_schedule_start: Optional[Callable[[], None]] = None
         self.on_schedule_stop: Optional[Callable[[str], None]] = None
+        self.on_speed_limit_change: Optional[Callable[[int], None]] = None
         self.on_tick: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def update_config(self,
@@ -68,7 +80,11 @@ class DownloadScheduler:
                       stop_time: Optional[str] = None,
                       days: Optional[List[int]] = None,
                       on_stop_action: Optional[str] = None,
-                      auto_start_if_in_window: Optional[bool] = None):
+                      auto_start_if_in_window: Optional[bool] = None,
+                      speed_schedule_enabled: Optional[bool] = None,
+                      speed_schedule_start: Optional[str] = None,
+                      speed_schedule_end: Optional[str] = None,
+                      speed_schedule_limit_kb: Optional[int] = None):
         with self._lock:
             if enabled is not None:
                 self.enabled = enabled
@@ -84,9 +100,18 @@ class DownloadScheduler:
                 self.on_stop_action = on_stop_action
             if auto_start_if_in_window is not None:
                 self.auto_start_if_in_window = auto_start_if_in_window
+            if speed_schedule_enabled is not None:
+                self.speed_schedule_enabled = speed_schedule_enabled
+            if speed_schedule_start is not None:
+                self.speed_schedule_start = speed_schedule_start
+            if speed_schedule_end is not None:
+                self.speed_schedule_end = speed_schedule_end
+            if speed_schedule_limit_kb is not None:
+                self.speed_schedule_limit_kb = speed_schedule_limit_kb
 
             # Reset window state so recalculations take effect immediately
             self._last_window_state = None
+            self._last_speed_limit_bps = None
 
     def start(self):
         with self._lock:
@@ -136,6 +161,18 @@ class DownloadScheduler:
         else:
             return False
 
+    def is_in_speed_schedule_window(self, now: Optional[datetime] = None) -> bool:
+        """Determines whether current time falls within active speed throttling window."""
+        now_dt = now or datetime.now()
+        start_t = parse_time_str(self.speed_schedule_start)
+        end_t = parse_time_str(self.speed_schedule_end)
+        curr_t = now_dt.time()
+        if start_t < end_t:
+            return start_t <= curr_t < end_t
+        elif start_t > end_t:
+            return (curr_t >= start_t) or (curr_t < end_t)
+        return False
+
     def is_day_active(self, dt: Optional[datetime] = None) -> bool:
         dt = dt or datetime.now()
         return dt.weekday() in self.days
@@ -165,7 +202,12 @@ class DownloadScheduler:
                 "stop_time_str": stop_str,
                 "stop_enabled": stop_en,
                 "on_stop_action": action,
-                "days": days
+                "days": days,
+                "speed_schedule_enabled": self.speed_schedule_enabled,
+                "speed_schedule_start": self.speed_schedule_start,
+                "speed_schedule_end": self.speed_schedule_end,
+                "speed_schedule_limit_kb": self.speed_schedule_limit_kb,
+                "is_in_speed_window": self.is_in_speed_schedule_window(now_dt) if self.speed_schedule_enabled else False
             }
 
         start_t = parse_time_str(start_str)
@@ -216,7 +258,7 @@ class DownloadScheduler:
             next_event = "start"
             next_event_time_str = start_str
 
-        return {
+        res = {
             "enabled": True,
             "is_in_window": in_window,
             "state_text": state_text,
@@ -229,8 +271,14 @@ class DownloadScheduler:
             "stop_time_str": stop_str,
             "stop_enabled": stop_en,
             "on_stop_action": action,
-            "days": days
+            "days": days,
+            "speed_schedule_enabled": self.speed_schedule_enabled,
+            "speed_schedule_start": self.speed_schedule_start,
+            "speed_schedule_end": self.speed_schedule_end,
+            "speed_schedule_limit_kb": self.speed_schedule_limit_kb,
+            "is_in_speed_window": self.is_in_speed_schedule_window(now_dt) if self.speed_schedule_enabled else False
         }
+        return res
 
     def _format_duration(self, seconds: int) -> str:
         if seconds <= 0:
@@ -248,10 +296,38 @@ class DownloadScheduler:
     def tick(self, now: Optional[datetime] = None):
         """Single tick step called every second."""
         now_dt = now or datetime.now()
+
+        # Check speed schedule independently
         with self._lock:
-            if not self.enabled:
-                self._last_window_state = False
-                return
+            speed_en = self.speed_schedule_enabled
+            queue_en = self.enabled
+
+        if speed_en and self.is_day_active(now_dt):
+            in_speed_win = self.is_in_speed_schedule_window(now_dt)
+            target_bps = (self.speed_schedule_limit_kb * 1024) if in_speed_win else 0
+            if self._last_speed_limit_bps != target_bps:
+                self._last_speed_limit_bps = target_bps
+                if self.on_speed_limit_change:
+                    try:
+                        self.on_speed_limit_change(target_bps)
+                    except Exception as e:
+                        print(f"[DownloadScheduler] Error in on_speed_limit_change: {e}")
+        elif self._last_speed_limit_bps is not None and not speed_en:
+            self._last_speed_limit_bps = None
+            if self.on_speed_limit_change:
+                try:
+                    self.on_speed_limit_change(0)
+                except Exception as e:
+                    print(f"[DownloadScheduler] Error resetting speed limit: {e}")
+
+        if not queue_en:
+            self._last_window_state = False
+            if self.on_tick:
+                try:
+                    self.on_tick(self.get_status(now_dt))
+                except Exception:
+                    pass
+            return
 
         status = self.get_status(now_dt)
         curr_in_window = status["is_in_window"]

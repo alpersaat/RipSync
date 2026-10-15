@@ -44,19 +44,28 @@ def notify_download_completed(filename: str, save_path: str, is_video: bool = Fa
 
     threading.Thread(target=_worker, daemon=True).start()
 
-def show_in_explorer(file_or_dir_path: str):
-    """
-    Opens Windows Explorer highlighting the file, or opening the directory.
-    """
-    try:
-        abs_path = os.path.abspath(file_or_dir_path)
-        if os.path.isfile(abs_path):
-            subprocess.Popen(f'explorer /select,"{abs_path}"')
-        elif os.path.isdir(abs_path):
-            subprocess.Popen(f'explorer "{abs_path}"')
-        else:
-            parent = os.path.dirname(abs_path)
-            if os.path.exists(parent):
-                subprocess.Popen(f'explorer "{parent}"')
-    except Exception as e:
-        print(f"[Explorer] Error opening explorer: {e}")
+
+def play_completion_sound():
+    """Plays subtle IDM-style native notification chime on completion."""
+    def _play():
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:
+            pass
+    threading.Thread(target=_play, daemon=True).start()
+
+
+def play_error_sound():
+    """Plays subtle native error chime on download failure."""
+    def _play():
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONHAND)
+        except Exception:
+            pass
+    threading.Thread(target=_play, daemon=True).start()
+
+
+from core.paths import show_in_explorer
+

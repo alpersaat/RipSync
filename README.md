@@ -85,6 +85,140 @@ Herhangi bir Python kurulumuna ihtiyaç duymadan doğrudan kurup kullanabilirsin
    - Sayfalardaki video oynatıcılarda kayan **"⚡ Bu Videoyu İndir"** düğmesi (Video Sniffer) gösterir.
    - Bağlantılara sağ tıklayıp *"Bu bağlantıyı RipSync ile indir"* menüsü sunar.
 
+10. **🔍 Canlı Arama ve Hızlı Filtre Çubuğu (Live Search & Filter Bar):**
+    - **Anlık Canlı Arama:** `Ctrl+F` kısayolu veya üst arama kutusu ile dosya adı veya URL'ye göre milisaniyelik gecikmesiz canlı filtreleme. `Esc` tuşu ile tek tuşla temizleme.
+    - **Hızlı Durum Filtre Rozetleri:** *Tümü*, *⏳ İnenler*, *✔ Tamamlananlar*, *⏸ Duraklatılanlar*, *❌ Hatalar* butonlarıyla tek tıkla listeyi durumuna göre süzme.
+
+11. **📋 Toplu Bağlantı İndirici & İçe / Dışa Aktarma (Batch URL Add & Import/Export):**
+    - **Toplu Link Ekleme (Ctrl+B):** Birden fazla web bağlantısını alt alta yapıştırıp tek tıkla sıralı indirme kuyruğuna ekleme.
+    - **Dosyadan İçe Aktarma:** `.txt`, `.m3u` veya `.list` dosyalarından bağlantı listelerini içeri aktarma.
+    - **Dışa Aktarma (Export):** İndirme listesini veya seçilen indirmeleri `.txt` ya da `.json` formatında dışa aktarma.
+
+12. **🛡️ Dosya Bütünlüğü Doğrulayıcı (Checksum / Hash Calculator):**
+    - **Çoklu Hash Hesaplama:** Tamamlanan herhangi bir dosyaya sağ tıklanarak **MD5**, **SHA-1** ve **SHA-256** hash değerlerini arka planda yüksek hızda hesaplama.
+    - **Tek Tıkla Doğrulama:** Web sitesinden alınan beklenen hash değerini yapıştırarak dosyanın bozulup bozulmadığını veya değiştirilip değiştirilmediğini anında doğrulama (*✅ Hash Doğrulandı* / *❌ Uyuşmuyor*).
+
+13. **🔄 Otomatik Ağ Yeniden Deneme (Auto-Retry on Network Drops):**
+    - **Kesintilere Karşı Dayanıklılık:** Wi-Fi koptuğunda veya sunucu geçici ağ hatası verdiğinde indirme hemen hata verip durmaz; arka planda üstel bekleme ile otomatik olarak N defa (varsayılan 3 kez) kaldığı yerden devam etmeyi dener.
+    - **Yapılandırılabilir Ayarlar:** Ayarlar penceresinden otomatik yeniden deneme açılıp kapatılabilir, maksimum deneme sayısı belirlenebilir.
+
+14. **ℹ️ İndirme Özellikleri & Bağlantı Detayı Penceresi (Download Properties):**
+    - Sağ tık menüsünden *"ℹ️ İndirme Özellikleri"* seçilerek dosyanın kaynak URL'si, Referer adresi, kayıt konumu, parçalı indirme (Range) desteği, kanal sayısı, eklenme tarihi, anlık/ortalama hız ve kalan süre gibi teknik detaylarını görüntüleme ve kopyalama.
+
+15. **𝕏 X (Twitter) Doğrudan HD Video İndirici:**
+    - Bir Twitter / X tweet video bağlantısı kopyalandığında sağ alttaki bildirim balonu otomatik olarak algılar ve tek tıkla en yüksek kalitede MP4 olarak indirmeyi başlatır.
+
+16. **📈 Canlı Ağ Hız Geçmişi Grafiği (Real-Time Bandwidth Sparkline Graph):**
+    - Alt durum çubuğunda son 40 saniyelik indirme hızı dalgalanmasını ve tepe (peak) hızını pürüzsüz degrade dalga formuyla canlı görselleştiren şık mini grafik.
+
+17. **📋 Gelişmiş Kuyruk Önceliği & Sıralama Kontrolleri (Queue Priority & Reordering):**
+    - **Esnek Sıralama:** İndirme tablosunda sağ tıklayarak veya `Ctrl+Yukarı` / `Ctrl+Aşağı` kısayollarıyla indirme görevlerini kuyrukta yukarı, aşağı, en başa (öncelikli başlat) veya en sona taşıma.
+    - **Otomatik Kapasite Yönetimi:** Sıralama değiştiğinde eşzamanlı indirme limitine göre en üstteki indirme anında devreye alınır.
+
+18. **🎯 Sürükle-Bırak Entegrasyonu (Drag & Drop Dropzone & Export Drop):**
+    - **Pencereye Bırakma:** Tarayıcıdan bir bağlantıyı veya masaüstünden `.txt`, `.json`, `.m3u` dosyasını doğrudan RipSync penceresine sürükleyip bırakarak indirmeyi anında başlatma.
+    - **Dışa Aktarma (Export Drop):** Tamamlanan dosyaları RipSync tablosundan tutup doğrudan Discord, Slack, masaüstü veya dosya gezgini klasörlerine sürükleyerek kopyalayabilme (`QDrag`).
+
+19. **🏁 Bittiğinde Otomatik Açma / Çalıştırma (Auto-Open on Completion):**
+    - Yeni İndirme penceresinde, İlerleme detayında veya sağ tık menüsünde *"🏁 İndirme Tamamlandığında Dosyayı Otomatik Aç"* seçeneği.
+    - Büyük kurulum dosyaları (`.exe`, `.iso`) veya filmler biter bitmez kullanıcı başında beklemeden otomatik başlatılır.
+
+20. **🔔 IDM Tarzı Sesli Bildirimler (Audio Notifications):**
+    - İndirme tamamlandığında veya ağ hatası oluştuğunda hafif ve şık Windows yerel sistem ses efekti (`winsound.MessageBeep`) ile kullanıcıyı sesli bilgilendirme. Ayarlar menüsünden tek tıkla açılıp kapatılabilir.
+
+21. **💾 Disk Boş Alan Denetimi & Yetersiz Alan Koruması:**
+    - **Canlı Durum Göstergesi:** Alt durum çubuğunda indirme sürücüsündeki kullanılabilir boş alanı (`💾 C: 142 GB Boş`) canlı gösterir.
+    - **Yetersiz Alan Koruması:** İndirme başlamadan önce diskte kalan boş alan kontrol edilir; yetersiz alan durumunda indirme diski doldurup sistemi kilitlemeden önce kullanıcı uyarılır.
+
+22. **🔢 Sütun Başlıklarına Tıklayarak Akıllı Sayısal Sıralama (Smart Column Sort):**
+    - Tablo sütun başlıklarına (*Dosya Adı*, *Boyut*, *Hız*, *Kalan Süre*, *Eklenme Tarihi*) tıklayarak Artan/Azalan akıllı sıralama.
+    - Boyut ve hız değerleri salt metin değil, arka plandaki ham byte ve saniye değerlerine göre matematiksel olarak doğru sıralanır.
+
+23. **📊 Detaylı İndirme İstatistikleri & Trafik Paneli (Statistics Dashboard):**
+    - Üst araç çubuğundaki *"📊 İstatistikler"* butonu veya alt durum çubuğundaki canlı hız grafiğine tıklanarak açılan şık raporlama paneli.
+    - Tüm zamanların toplam indirilen veri trafiği, tamamlanan dosya sayıları, bugünkü trafik hacmi, dosya kategorileri dağılımı ve disk doluluk yüzdesini kartlar ve grafik barlarla görselleştirme.
+
+24. **🔄 Süresi Dolan Bağlantı Adresini Yenileme (Refresh / Update Expired URL):**
+    - Google Drive, Rapidgator veya geçici token ile çalışan dosya sunucularında indirme bağlantısı zaman aşımına uğradığında (HTTP 403/410/Link Expired), tüm indirmeyi baştan başlatmak yerine sağ tıklayıp *"🔄 Bağlantı Adresini Yenile"* seçeneğiyle yeni link verilir. RipSync yeni linkin başlıklarını doğrular ve indirmeye tam kaldığı byte'tan devam eder.
+
+25. **🧹 Kayıp / Taşınmış Dosyaları Denetleme ve Ayıklama (Missing Files Cleaner):**
+    - Diskte silinmiş, taşınmış veya harici disk çıkarıldığı için ulaşılamayan tamamlanmış dosyalar indirme listesinde *"⚠️ Dosya Eksik"* rozeti ile otomatik işaretlenir. Araç çubuğundaki *"🧹 Eksik Dosyaları Temizle"* butonu veya sağ tık menüsü ile tek tıkla liste geçmişi temizlenebilir.
+
+26. **🌐 Proxy Desteği (HTTP / HTTPS / SOCKS5) ve Kimlik Doğrulama:**
+    - Modern Ayarlar panelinden (Ağ & Proxy) HTTP, HTTPS ve SOCKS5 proxy sunucu adresi ve portu tanımlayabilme. Kullanıcı adı ve şifre ile kimlik doğrulama (Authentication) desteği. Hem çok parçalı segment indirmelerinde (`httpx`) hem de sosyal medya/video indirmelerinde (`yt-dlp`) kesintisiz proxy tünellemesi.
+
+27. **⚡ Akıllı Hız Limiti Zamanlaması (Gündüz Sınırla / Gece Tam Hız):**
+    - Zamanlayıcı penceresinden günün belirli saatlerinde (örneğin çalışma saatleri 09:00 - 18:00 arasında) bant genişliğini sömürmemek için hız limiti (örn. 2 MB/s) tanımlama, zaman aralığı dışında ise otomatik olarak tam hıza geçme desteği.
+
+28. **📦 Bittiğinde Otomatik Arşiv Çıkarma (.zip, .tar, .gz, .bz2):**
+    - Arşiv dosyaları (`.zip`, `.tar`, `.tar.gz`, `.tar.bz2`) indirildiğinde isteğe bağlı olarak otomatik veya sağ tıklanarak *"📦 Arşivi Buraya Çıkart"* ile klasöre açma. Güvenlik korumalı (ZipSlip / Path-traversal engeli) asenkron arka plan motoru.
+
+29. **🎨 Aydınlık / Koyu Tema Desteği & Vurgu Rengi Seçici (Accent Color):**
+    - Ayarlar panelinden Koyu (Tokyo Night) ve Aydınlık (Clean Light) tema modları arasında geçiş yapabilme. Mavi, Mor, Zümrüt Yeşili ve Canlı Turuncu olmak üzere 4 farklı vurgu rengi ile kişiselleştirme. Uygulama yeniden başlatılmadan anında canlı uygulanır.
+
+30. **🎯 Çok Kriterli Gelişmiş Filtreleme (Boyut & Tarihe Göre Süzme):**
+    - Arama çubuğuna entegre boyut filtresi (`<50 MB`, `50-500 MB`, `500 MB-2 GB`, `>2 GB`) ve eklenme tarihi filtresi (`Bugün`, `Dün`, `Son 7 Gün`, `Daha Eski`) ile yüzlerce indirme arasından aranan dosyaları anında filtreleme.
+
+31. **🏷️ Akıllı Dosya Çakışma Yönetimi & Otomatik Adlandırma (Conflict & Auto-Rename):**
+    - İndirilen dosya kayıt klasöründe zaten mevcutsa üzerine yazıp veriyi kaybetmeyi önler; Ayarlar panelinden *"Otomatik Numaralandır (`dosya (1).ext`)"*, *"Üzerine Yaz"* veya *"İndirmeyi Atla"* tercihleri belirlenebilir.
+    - URL sonundaki gereksiz sorgu parametrelerini ayıklar, Windows'un yasaklı karakterlerini (`<>:"/\|?*`) ve ayrılmış aygıt adlarını (`CON`, `PRN`, `AUX`, `NUL`) güvenle temizler.
+    - Yeni İndirme penceresinde dosya çakışması anlık olarak sarı uyarı kartıyla canlı gösterilir.
+
+32. **⚖️ Görev Başına Bant Genişliği Önceliği & Dinamik Paylaşım (Bandwidth Priority Weighting):**
+    - Çoklu indirmelerde acil dosyaların diğerlerinden daha hızlı inmesi için **🚀 Yüksek Öncelik (3.0x - %70 Hız Payı)**, **⚖️ Normal Öncelik (1.0x - Dengeli)** veya **🐢 Düşük Öncelik (0.33x - Arka Plan)** atayabilme.
+    - İndirme tablosundan sağ tıklanarak, toplu seçim menüsünden veya Yeni İndirme / Toplu Link Ekleme pencerelerinden doğrudan öncelik belirleme.
+    - Global hız sınırı aktifken toplam bant genişliğini görevlerin öncelik ağırlıklarına göre matematiksel olarak paylaştırır; tabloda ve özellikler penceresinde rozetlerle canlı görselleştirilir.
+
+33. **🤖 İndirme Bittiğinde Özel Komut & Webhook Bildirimleri (Post-Download Automation & Webhooks):**
+    - **Özel Komut Çalıştırma (CLI / Script):** İndirme tamamlandığında arka planda kullanıcı tanımlı komut veya betik çalıştırma. `{filepath}`, `{filename}`, `{filesize}`, `{category}`, `{url}`, `{status}` gibi şablon değişkenleriyle scriptlere dinamik parametre aktarımı.
+    - **Webhook Entegrasyonu (Discord / Slack / REST API):** İndirme bittiğinde Discord sunucunuza, Slack kanalınıza veya özel webhook servisinize görsel kartlı (embed) anlık JSON bildirimi gönderme.
+    - **Canlı Test Butonu:** Ayarlar -> *Otomasyon & Webhook* sekmesinden tek tıkla webhook bağlantısını anında test edip doğrulama.
+
+34. **🌙 Akıllı Sistem Uykusunu Engelleme (Keep-Awake / Sleep Prevention):**
+    - **Kesintisiz Gece İndirmeleri:** Büyük dosyalar veya oynatma listeleri indirilirken Windows'un uyku veya bekleme moduna (Sleep/Standby) geçmesini otomatik olarak engeller (`SetThreadExecutionState` Win32 API).
+    - **Otomatik Güç Dönüşü:** Kuyruk bittiğinde veya tüm indirmeler tamamlandığında güç kilitlerini serbest bırakarak sistemin varsayılan güç planına dönmesini sağlar.
+    - **Yapılandırılabilir Tercih:** Ayarlar -> Hız & Güç sekmesinden tek tıkla etkinleştirilip devre dışı bırakılabilir.
+
+35. **📑 Ardışık Bağlantı Kalıp Sihirbazı (Pattern / Sequential Batch URL Generator - IDM Tarzı):**
+    - **Gömülü Aralıklar:** `https://site.com/file_[01-20].zip`, `image_[1-100:5].jpg` veya `part_[a-z].rar` gibi şablonlardan tek tıkla onlarca bağlantıyı otomatik üretme.
+    - **Yer Tutucu & Canlı Önizleme:** Toplu İndirme Penceresindeki (`Ctrl+B`) *"🪄 Kalıp Sihirbazı"* ile basamak dolgusu (01, 001) ve canlı önizleme eşliğinde bağlantıları kuyruğa aktarma.
+
+36. **🍪 Tarayıcı Çerezlerini İçe Aktarma (Browser Cookies Importer - YouTube / Instagram):**
+    - **Korumalı İçerik Desteği:** Google Chrome, Microsoft Edge, Brave veya Mozilla Firefox oturum çerezlerini entegre ederek YouTube'daki yaş kısıtlamalı (+18) videoları, üyelere özel içerikleri ve oturum gerektiren Instagram gönderilerini sorunsuz indirme.
+    - **Esnek Seçim:** Ayarlar panelinden tarayıcı profili belirleme veya devre dışı bırakma.
+
+37. **📝 YouTube & Video Altyazı (.SRT) ve Kapak Resmi İndirici (Subtitles & Thumbnail Extractor):**
+    - **Otomatik Altyazı Kaydetme:** Video indirilirken Türkçe, İngilizce veya orijinal dildeki altyazıları doğrudan `.srt` / `.vtt` olarak dosyanın yanına kaydetme seçeneği.
+    - **HD Kapak Görseli:** Yeni İndirme penceresinden video kapağını (`.jpg`) tek tıkla arşivleme imkanı.
+
+38. **🎵 Akıllı MP3 Etiket Düzenleyici & Albüm Kapağı Gömücü (ID3 Tag & Artwork Injector):**
+    - **Müzik Çalar Entegrasyonu:** Sosyal medyadan veya YouTube'dan `"Sadece Ses / Müzik (MP3)"` indirildiğinde sanatçı adını, şarkı başlığını ve albüm kapağını doğrudan MP3 dosyasının içine (ID3v2 metadata) gömer.
+    - Otomobil teyplerinde, iPhone/Android telefonlarda ve müzik çalarlarda eksiksiz parça bilgisi ve kapak görseli sağlar.
+
+39. **🏷️ İndirmeler İçin Özel Renkli Etiketler & Filtreleme (Tags System):**
+    - **Kişisel Gruplandırma:** Dosyalara `İş`, `Ders`, `Acil`, `Arşiv` gibi özel etiketler atayabilme.
+    - **Renkli Rozetler & Canlı Filtre:** İndirme tablosunda dosya adının yanında etiket rozetleri (`[İş]`, `[Ders]`), sol panelde *"🏷️ Etiketler"* ağacı ve sağ tık menüsünden tek tıkla toplu etiket atama.
+
+40. **🌐 Alan Adına (Siteye) Özel İndirme Kuralları (Site Rules & Per-Domain Folders):**
+    - **Otomatik Klasör Yönlendirmesi:** Belirli web siteleri için özel kayıt klasörleri tanımlayabilme (Örn: `github.com` ➔ `C:\Projeler`, `artstation.com` ➔ `D:\Görseller`).
+    - **Akıllı Eşleşme:** URL girildiğinde (Yeni İndirme, Tarayıcı Eklentisi veya Toplu Ekleme) domain kuralı anında devreye girer ve hedef klasör otomatik belirlenir. Ayarlar -> *Site Kuralları* sekmesinden kolay kural yönetimi.
+
+41. **🛡️ Akıllı Yinelenen (Duplicate) İndirme Koruması:**
+    - **Mükerrer İndirme Engeli:** Daha önce indirilmiş veya listede mevcut olan bir URL ya da dosya yeniden indirilmek istendiğinde kullanıcıyı uyarır.
+    - **Akıllı Eylemler:** Açılan diyalog üzerinden tek tıkla *"📂 Dosyayı / Klasörü Aç"*, *"🔄 Yeniden İndir"* veya *"❌ İptal Et"* seçenekleri. Ayarlar -> Genel sekmesinden açılıp kapatılabilir.
+
+42. **🎯 Pano (Clipboard) Akıllı Filtreleme & Kara Liste:**
+    - **Hedef Odaklı Pano İzleme:** Sadece video, ses ve dosya indirmelerini yakalamak için *"🎯 Yalnızca doğrudan medya ve dosya uzantılarını yakala"* seçeneği.
+    - **Özel Kara Liste (Exclusion Domains):** `google.com`, `github.com`, `stackoverflow.com` gibi istenmeyen web sitelerini kara listeye ekleyerek rahatsız edici bildirimleri engelleme.
+
+43. **🗂️ Bağımsız Çoklu Kuyruk Yönetimi (Custom Download Queues):**
+    - **Kişiselleştirilmiş Kuyruklar:** *"Ana Kuyruk"*, *"İş Dosyaları"*, *"Dizi/Film Arşivi"* gibi sınırsız sayıda bağımsız indirme kuyruğu oluşturabilme.
+    - **Kuyruk Odaklı Kontrol:** Sol paneldeki ağaç menüsünden kuyrukları filtreleme, sağ tıklayarak seçilen kuyruğu tek tıkla başlatma/duraklatma ve indirme görevlerini kuyruklar arasında kolayca taşıma.
+
+44. **📶 Tarifeli Bağlantı (Hotspot / Mobil Veri) Koruması (Metered Connection Guard):**
+    - **Mobil Kota Tasarrufu:** Telefonunuzun internetine (Hotspot / Taşınabilir Erişim Noktası) veya tarifeli bir ağa bağlandığınızda büyük indirmeleri otomatik beklemeye alarak internet paketinizin tükenmesini önler.
+    - **Tek Tıkla Geçici İzin:** Durum çubuğundaki *"📶 Tarifeli Bağlantı (Kota Koruması Aktif)"* rozetine tıklayarak acil durumlarda kota korumasını tek tıkla geçici olarak aşabilme.
+
 ---
 
 ## 🌐 Chrome / Edge / Brave Eklentisi Kurulumu (1 Dakika)

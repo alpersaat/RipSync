@@ -9,6 +9,7 @@ import httpx
 
 from core.segment import Segment
 from core.speed_limiter import SpeedLimiter
+from core.paths import sanitize_filename, resolve_file_conflict
 
 MIN_SPLIT_SIZE = 1024 * 1024  # 1 MB minimum remaining to split a segment
 
@@ -21,6 +22,10 @@ class MultiThreadDownloader:
                  connections: int = 8,
                  headers: Optional[Dict[str, str]] = None,
                  speed_limit_bps: int = 0,
+                 proxy: Optional[str] = None,
+                 auto_retry: bool = True,
+                 max_retries: int = 3,
+                 retry_delay: float = 3.0,
                  on_progress: Optional[Callable[[int, int, float, int], None]] = None,
                  on_segments_update: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
                  on_status_change: Optional[Callable[[str, str], None]] = None):
@@ -32,6 +37,12 @@ class MultiThreadDownloader:
         self.connections = max(1, min(32, connections))
         self.headers = headers or {}
         self.speed_limiter = SpeedLimiter(speed_limit_bps)
+        self.proxy = proxy
+
+        self.auto_retry = auto_retry
+        self.max_retries = max(1, max_retries)
+        self.retry_delay = retry_delay
+        self.retry_count = 0
 
         self.on_progress = on_progress
         self.on_segments_update = on_segments_update
@@ -65,69 +76,82 @@ class MultiThreadDownloader:
         if "User-Agent" not in req_headers and "user-agent" not in req_headers:
             req_headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
-        try:
-            with httpx.Client(follow_redirects=True, timeout=20.0) as client:
-                resp = None
-                # Try HEAD first
-                try:
-                    resp = client.head(self.url, headers=req_headers)
-                except Exception:
-                    pass
+        attempts = self.max_retries if self.auto_retry else 1
+        for attempt in range(attempts):
+            try:
+                client_kwargs = {"follow_redirects": True, "timeout": 20.0}
+                if self.proxy:
+                    client_kwargs["proxy"] = self.proxy
+                with httpx.Client(**client_kwargs) as client:
+                    resp = None
+                    # Try HEAD first
+                    try:
+                        resp = client.head(self.url, headers=req_headers)
+                    except Exception:
+                        pass
 
-                # If HEAD fails or returns 405/403, fallback to GET with Range: bytes=0-0
-                if not resp or resp.status_code >= 400 or "content-length" not in resp.headers:
-                    probe_headers = dict(req_headers)
-                    probe_headers["Range"] = "bytes=0-0"
-                    resp = client.get(self.url, headers=probe_headers)
+                    # If HEAD fails or returns 405/403, fallback to GET with Range: bytes=0-0
+                    if not resp or resp.status_code >= 400 or "content-length" not in resp.headers:
+                        probe_headers = dict(req_headers)
+                        probe_headers["Range"] = "bytes=0-0"
+                        resp = client.get(self.url, headers=probe_headers)
 
-                # Extract filename if not set
-                if not self.filename:
-                    cd = resp.headers.get("content-disposition", "")
-                    if "filename*=" in cd:
-                        match = re.search(r"filename\*=UTF-8''([^;]+)", cd, re.IGNORECASE)
-                        if match:
-                            self.filename = urllib.parse.unquote(match.group(1))
-                    elif "filename=" in cd:
-                        match = re.search(r'filename="?([^";]+)"?', cd, re.IGNORECASE)
-                        if match:
-                            self.filename = match.group(1)
-
+                    # Extract filename if not set
                     if not self.filename:
-                        # Extract from URL path
-                        parsed = urllib.parse.urlparse(str(resp.url))
-                        path_name = os.path.basename(parsed.path)
-                        self.filename = urllib.parse.unquote(path_name) if path_name else "download.bin"
+                        cd = resp.headers.get("content-disposition", "")
+                        if "filename*=" in cd:
+                            match = re.search(r"filename\*=UTF-8''([^;]+)", cd, re.IGNORECASE)
+                            if match:
+                                self.filename = urllib.parse.unquote(match.group(1))
+                        elif "filename=" in cd:
+                            match = re.search(r'filename="?([^";]+)"?', cd, re.IGNORECASE)
+                            if match:
+                                self.filename = match.group(1)
 
-                self.filename = self._get_clean_filename(self.filename)
-                os.makedirs(self.save_dir, exist_ok=True)
-                self.save_path = os.path.join(self.save_dir, self.filename)
-                self.state_file = self.save_path + f".{self.download_id}.ripsync_state"
+                        if not self.filename:
+                            # Extract from URL path
+                            parsed = urllib.parse.urlparse(str(resp.url))
+                            path_name = os.path.basename(parsed.path)
+                            self.filename = urllib.parse.unquote(path_name) if path_name else "download.bin"
 
-                # Check Content-Length and Range support
-                cr = resp.headers.get("content-range", "")
-                if cr and "/" in cr:
-                    try:
-                        tot = cr.split("/")[1].strip()
-                        if tot != "*":
-                            self.total_size = int(tot)
-                            self.accept_ranges = True
-                    except Exception:
-                        pass
+                    if not self.save_path:
+                        self.filename = sanitize_filename(self.filename)
+                        os.makedirs(self.save_dir, exist_ok=True)
+                        resolved_name, _ = resolve_file_conflict(self.save_dir, self.filename, action="auto_rename")
+                        self.filename = resolved_name
+                        self.save_path = os.path.join(self.save_dir, self.filename)
+                        self.state_file = self.save_path + f".{self.download_id}.ripsync_state"
 
-                if self.total_size <= 0 and "content-length" in resp.headers:
-                    try:
-                        self.total_size = int(resp.headers["content-length"])
-                    except Exception:
-                        pass
+                    # Check Content-Length and Range support
+                    cr = resp.headers.get("content-range", "")
+                    if cr and "/" in cr:
+                        try:
+                            tot = cr.split("/")[1].strip()
+                            if tot != "*":
+                                self.total_size = int(tot)
+                                self.accept_ranges = True
+                        except Exception:
+                            pass
 
-                if resp.headers.get("accept-ranges", "").lower() == "bytes" or resp.status_code == 206:
-                    self.accept_ranges = True
+                    if self.total_size <= 0 and "content-length" in resp.headers:
+                        try:
+                            self.total_size = int(resp.headers["content-length"])
+                        except Exception:
+                            pass
 
-                return True
-        except Exception as e:
-            self.error_message = f"Bağlantı hatası: {str(e)}"
-            self._set_status("Error", self.error_message)
-            return False
+                    if resp.headers.get("accept-ranges", "").lower() == "bytes" or resp.status_code == 206:
+                        self.accept_ranges = True
+
+                    return True
+            except Exception as e:
+                if self.auto_retry and attempt < attempts - 1 and not self._stop_event.is_set():
+                    self._set_status("Retrying", f"Bağlantı kuruluyor: Yeniden deneniyor ({attempt + 1}/{self.max_retries})...")
+                    time.sleep(2.0)
+                    continue
+                self.error_message = f"Bağlantı hatası: {str(e)}"
+                self._set_status("Error", self.error_message)
+                return False
+        return False
 
     def _allocate_file(self):
         """Allocate destination file. Avoid zero-filling if file already exists."""
@@ -201,6 +225,7 @@ class MultiThreadDownloader:
 
     def start(self):
         self._stop_event.clear()
+        self.retry_count = 0
         if not self.save_path:
             if not self.probe_url():
                 return
@@ -218,7 +243,8 @@ class MultiThreadDownloader:
                 end_byte=cfg["end"],
                 current_byte=cfg["current"],
                 headers=self.headers,
-                speed_limiter=self.speed_limiter
+                speed_limiter=self.speed_limiter,
+                proxy=self.proxy
             )
             self.segments.append(seg)
             seg.start()
@@ -226,6 +252,16 @@ class MultiThreadDownloader:
         self._set_status("Downloading")
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._monitor_thread.start()
+
+    def update_url(self, new_url: str, new_headers: Optional[Dict[str, str]] = None):
+        """Updates target URL (for expired link refresh) and preserves existing downloaded bytes."""
+        with self.lock:
+            self.url = new_url
+            if new_headers is not None:
+                self.headers = new_headers
+            if self.status == "Error":
+                self.status = "Paused"
+                self.error_message = ""
 
     def pause(self):
         self._stop_event.set()
@@ -342,6 +378,38 @@ class MultiThreadDownloader:
 
             if any_error:
                 err_msg = next((str(s.error) for s in self.segments if s.error), "İndirme hatası")
+                if self.auto_retry and self.retry_count < self.max_retries and not self._stop_event.is_set():
+                    self.retry_count += 1
+                    delay = self.retry_delay * (1.5 ** (self.retry_count - 1))
+                    self._set_status("Retrying", f"Ağ kesintisi: Yeniden deneniyor ({self.retry_count}/{self.max_retries}) - {int(delay)} sn...")
+                    for seg in self.segments:
+                        seg.stop()
+                    self._save_state()
+
+                    waited = 0.0
+                    while waited < delay and not self._stop_event.is_set():
+                        time.sleep(0.2)
+                        waited += 0.2
+
+                    if not self._stop_event.is_set():
+                        self._load_or_create_segments()
+                        self.segments = []
+                        for cfg in self._segment_configs:
+                            seg = Segment(
+                                index=cfg["index"],
+                                url=self.url,
+                                save_path=self.save_path,
+                                start_byte=cfg["start"],
+                                end_byte=cfg["end"],
+                                current_byte=cfg["current"],
+                                headers=self.headers,
+                                speed_limiter=self.speed_limiter
+                            )
+                            self.segments.append(seg)
+                            seg.start()
+                        self._set_status("Downloading")
+                        continue
+
                 self._set_status("Error", err_msg)
                 self._save_state()
                 break
