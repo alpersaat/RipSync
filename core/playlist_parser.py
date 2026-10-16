@@ -76,7 +76,6 @@ def fetch_playlist_metadata(url: str) -> Dict[str, Any]:
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "nocheckcertificate": True,
         "extract_flat": "in_playlist",
         "skip_download": True,
         "http_headers": {

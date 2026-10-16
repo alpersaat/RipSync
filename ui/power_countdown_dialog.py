@@ -1,22 +1,39 @@
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QProgressBar
+    QPushButton, QProgressBar, QMessageBox
 )
 from PyQt6.QtGui import QFont
 
+
 class PowerCountdownDialog(QDialog):
+    """Shutdown/sleep countdown dialog.
+
+    The actual power action is *never* performed automatically: when the
+    countdown reaches zero (or the user clicks "Şimdi Kapat/Uyut") a blocking
+    confirmation is shown first, warning about unsaved work. Only an explicit
+    user confirmation triggers ``confirmed``.
+    """
     cancelled = pyqtSignal()
+    suspend_requested = pyqtSignal()
+    resume_requested = pyqtSignal()
+    confirmed = pyqtSignal()  # user explicitly confirmed shutdown/sleep
+
+    FLASH_THRESHOLD = 10  # seconds remaining when countdown starts flashing
 
     def __init__(self, action: str, total_seconds: int = 30, parent=None):
         super().__init__(parent)
         self.action = action  # "shutdown" or "sleep"
         self.total_seconds = total_seconds
         self.remaining_seconds = total_seconds
+        self.is_suspended = False
+        self._flash_timer = QTimer(self)
+        self._flash_timer.timeout.connect(self._toggle_flash)
+        self._flashing = False
 
         action_name = "Bilgisayarı Kapat" if action == "shutdown" else "Uyku Moduna Al"
-        self.setWindowTitle(f"RipSync - {action_name}")
-        self.setFixedSize(420, 210)
+        self.setWindowTitle(f"RipSync - {action_name} Onayı")
+        self.setFixedSize(520, 300)
         self.setWindowFlags(
             Qt.WindowType.Dialog |
             Qt.WindowType.WindowStaysOnTopHint |
@@ -28,74 +45,241 @@ class PowerCountdownDialog(QDialog):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(14)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        layout.setContentsMargins(24, 22, 24, 22)
 
         action_icon = "🛑" if self.action == "shutdown" else "🌙"
         action_title = "Bilgisayar Kapatılıyor" if self.action == "shutdown" else "Uyku Moduna Geçiliyor"
 
         self.lbl_title = QLabel(f"{action_icon} Kuyruk Bitti: {action_title}")
-        self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #f7768e if self.action == 'shutdown' else #7aa2f7;")
-        if self.action == "shutdown":
-            self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #f7768e;")
-        else:
-            self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #bb9af7;")
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0caf5;")
         layout.addWidget(self.lbl_title)
 
         self.lbl_info = QLabel(
-            f"Kuyruktaki tüm indirmeler tamamlandı.\n"
-            f"İşlemin gerçekleşmesine kalan süre:"
+            "Kuyruktaki tüm indirmeler tamamlandı.\n"
+            "İşlemin gerçekleşmesine kalan süre:"
         )
-        self.lbl_info.setStyleSheet("color: #c0caf5; font-size: 12px;")
+        self.lbl_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_info.setStyleSheet("color: #a9b1d6; font-size: 12px;")
         layout.addWidget(self.lbl_info)
+
+        self.lbl_warning = QLabel(
+            "⚠️ Kaydedilmemiş işleriniz kaybolabilir. "
+            "İşlemi onaylamanız gerekecek."
+        )
+        self.lbl_warning.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_warning.setStyleSheet(
+            "color: #f7768e; font-size: 12px; font-weight: bold;"
+        )
+        self.lbl_warning.setWordWrap(True)
+        layout.addWidget(self.lbl_warning)
 
         self.lbl_countdown = QLabel(f"{self.remaining_seconds} saniye")
         self.lbl_countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_countdown.setStyleSheet("font-size: 26px; font-weight: bold; color: #ff9e64; margin: 4px;")
+        self.lbl_countdown.setStyleSheet(
+            "font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;"
+        )
         layout.addWidget(self.lbl_countdown)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, self.total_seconds)
         self.progress.setValue(self.total_seconds)
         self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(8)
+        self.progress.setFixedHeight(14)
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #3b4261;
+                border-radius: 7px;
+                background-color: #1a1b26;
+            }
+            QProgressBar::chunk {
+                background-color: #f7768e;
+                border-radius: 7px;
+            }
+        """)
         layout.addWidget(self.progress)
 
         btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
+        btn_layout.setSpacing(8)
 
         self.btn_cancel = QPushButton("İşlemi İptal Et")
         self.btn_cancel.setStyleSheet("""
             QPushButton {
-                background-color: #f7768e;
-                color: #ffffff;
+                background-color: #414868;
+                color: #c0caf5;
                 font-weight: bold;
-                padding: 8px 16px;
+                padding: 8px 14px;
                 border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #ff899d;
+                background-color: #4f5675;
             }
         """)
         self.btn_cancel.clicked.connect(self._on_cancel)
         btn_layout.addWidget(self.btn_cancel)
 
-        self.btn_now = QPushButton("Şimdi Gerçekleştir")
-        self.btn_now.setObjectName("btn_secondary")
-        self.btn_now.clicked.connect(self.accept)
+        self.btn_suspend = QPushButton("⏸️ Askıya Al")
+        self.btn_suspend.setStyleSheet("""
+            QPushButton {
+                background-color: #7aa2f7;
+                color: #1a1b26;
+                font-weight: bold;
+                padding: 8px 14px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #89b4fa;
+            }
+        """)
+        self.btn_suspend.clicked.connect(self._toggle_suspend)
+        btn_layout.addWidget(self.btn_suspend)
+
+        btn_layout.addStretch()
+
+        self.btn_now = QPushButton("Şimdi Kapat" if self.action == "shutdown" else "Şimdi Uyut")
+        self.btn_now.setObjectName("btn_now")
+        self.btn_now.setStyleSheet("""
+            QPushButton#btn_now {
+                background-color: #f7768e;
+                color: #ffffff;
+                font-weight: bold;
+                padding: 10px 18px;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+            QPushButton#btn_now:hover {
+                background-color: #ff899d;
+            }
+        """)
+        self.btn_now.clicked.connect(self._on_now)
         btn_layout.addWidget(self.btn_now)
 
         layout.addLayout(btn_layout)
 
     def update_countdown(self, seconds: int):
-        self.remaining_seconds = seconds
-        self.lbl_countdown.setText(f"{seconds} saniye")
-        self.progress.setValue(seconds)
+        if not self.is_suspended:
+            self.remaining_seconds = seconds
+            self.lbl_countdown.setText(f"{seconds} saniye")
+            self.progress.setValue(seconds)
+            self._apply_flash_state(seconds)
+
+    def _apply_flash_state(self, seconds: int):
+        if seconds <= self.FLASH_THRESHOLD and seconds > 0 and not self._flashing:
+            self._flashing = True
+            self._flash_timer.start(500)
+        elif seconds > self.FLASH_THRESHOLD and self._flashing:
+            self._stop_flash()
+            self.lbl_countdown.setStyleSheet(
+                "font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;"
+            )
+
+    def _toggle_flash(self):
+        current = self.lbl_countdown.styleSheet()
+        flash_color = "#ff5f56" if self.action == "shutdown" else "#bb9af7"
+        if flash_color in current:
+            self.lbl_countdown.setStyleSheet(
+                "font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;"
+            )
+        else:
+            self.lbl_countdown.setStyleSheet(
+                f"font-size: 38px; font-weight: bold; color: {flash_color}; margin: 4px;"
+            )
+
+    def _stop_flash(self):
+        self._flashing = False
+        self._flash_timer.stop()
+
+    def set_suspended(self, suspended: bool, reason: str = "Aktif kullanım algılandı"):
+        self._stop_flash()
+        self.is_suspended = suspended
+        if suspended:
+            self.lbl_countdown.setText("⏸️ Askıya Alındı")
+            self.lbl_countdown.setStyleSheet("font-size: 26px; font-weight: bold; color: #7aa2f7; margin: 2px;")
+            self.lbl_info.setText(f"⚠️ {reason}.\nAçık işlerinizi korumak için geri sayım durduruldu.")
+            self.lbl_info.setStyleSheet("color: #7aa2f7; font-size: 12px; font-weight: bold;")
+            self.btn_suspend.setText("▶️ Devam Ettir")
+            self.btn_suspend.setStyleSheet("""
+                QPushButton {
+                    background-color: #9ece6a;
+                    color: #1a1b26;
+                    font-weight: bold;
+                    padding: 8px 14px;
+                    border-radius: 6px;
+                }
+                QPushButton:hover {
+                    background-color: #b9f27c;
+                }
+            """)
+        else:
+            self.lbl_countdown.setText(f"{self.remaining_seconds} saniye")
+            self.lbl_countdown.setStyleSheet("font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;")
+            self.lbl_info.setText(
+                "Kuyruktaki tüm indirmeler tamamlandı.\n"
+                "İşlemin gerçekleşmesine kalan süre:"
+            )
+            self.lbl_info.setStyleSheet("color: #a9b1d6; font-size: 12px;")
+            self.btn_suspend.setText("⏸️ Askıya Al")
+            self.btn_suspend.setStyleSheet("""
+                QPushButton {
+                    background-color: #7aa2f7;
+                    color: #1a1b26;
+                    font-weight: bold;
+                    padding: 8px 14px;
+                    border-radius: 6px;
+                }
+                QPushButton:hover {
+                    background-color: #89b4fa;
+                }
+            """)
+
+    def _toggle_suspend(self):
+        if self.is_suspended:
+            self.resume_requested.emit()
+        else:
+            self.suspend_requested.emit()
 
     def _on_cancel(self):
+        self._stop_flash()
         self.cancelled.emit()
         self.reject()
 
+    def _on_now(self):
+        """User wants to execute immediately: require explicit confirmation."""
+        self._stop_flash()
+        if self._request_confirmation():
+            self.confirmed.emit()
+            self.accept()
+
     def closeEvent(self, event):
+        self._stop_flash()
         self.cancelled.emit()
         event.accept()
+
+    @staticmethod
+    def request_confirmation(action: str, parent=None) -> bool:
+        """Blocking confirmation shown before shutdown/sleep.
+
+        Returns True only when the user explicitly confirms.
+        """
+        is_shutdown = action == "shutdown"
+        verb = "Kapatılacak" if is_shutdown else "Uyku moduna alınacak"
+        title = "Bilgisayar Kapatma Onayı" if is_shutdown else "Uyku Modu Onayı"
+        icon = QMessageBox.Icon.Warning if is_shutdown else QMessageBox.Icon.Question
+
+        box = QMessageBox(parent)
+        box.setIcon(icon)
+        box.setWindowTitle(f"RipSync - {title}")
+        box.setText(f"{verb}. Bu işlem geri alınamaz.")
+        box.setInformativeText(
+            "Kaydedilmemiş işleriniz (açık indirmeler, açık dosyalar) kaybolabilir.\n"
+            "İşleme devam etmek istediğinizden emin misiniz?"
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        box.setEscapeButton(QMessageBox.StandardButton.No)
+        yes_btn = box.button(QMessageBox.StandardButton.Yes)
+        yes_btn.setText("Evet, Onaylıyorum")
+        no_btn = box.button(QMessageBox.StandardButton.No)
+        no_btn.setText("Hayır, İptal Et")
+        return box.exec() == QMessageBox.StandardButton.Yes

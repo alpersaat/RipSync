@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QFileDialog, QSpinBox,
     QCheckBox, QFormLayout, QGroupBox, QComboBox, QSlider,
     QTabWidget, QWidget, QMessageBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView
+    QHeaderView, QAbstractItemView, QFrame
 )
 from core.database import Database
 from core.site_rules import SiteRulesManager
@@ -93,6 +93,15 @@ class SettingsDialog(QDialog):
         main_layout.setSpacing(14)
         main_layout.setContentsMargins(16, 16, 16, 16)
 
+        # Üst Arayüz Modu & Sekme Filtresi (Yeni Kullanıcı / Uzman Ayrımı)
+        top_bar = QHBoxLayout()
+        self.chk_show_advanced_tabs = QCheckBox("Gelişmiş Ayar Sekmelerini Göster (Proxy, Otomasyon & Webhook, Site Kuralları)")
+        self.chk_show_advanced_tabs.setStyleSheet("color: #7aa2f7; font-weight: bold; font-size: 11px;")
+        self.chk_show_advanced_tabs.toggled.connect(self._toggle_advanced_tabs)
+        top_bar.addWidget(self.chk_show_advanced_tabs)
+        top_bar.addStretch()
+        main_layout.addLayout(top_bar)
+
         self.tabs = QTabWidget()
 
         # ==========================================
@@ -138,7 +147,13 @@ class SettingsDialog(QDialog):
         self.combo_conflict_action.addItem("🔄 Otomatik Numaralandır (örn: dosya (1).ext)", "auto_rename")
         self.combo_conflict_action.addItem("⚠️ Mevcut Dosyanın Üzerine Yaz", "overwrite")
         self.combo_conflict_action.addItem("⏭️ İndirmeyi Atla / Bildir", "skip")
+        self.combo_conflict_action.currentIndexChanged.connect(self._on_conflict_action_changed)
         f_gen.addRow("Aynı İsimde Dosya Varsa (Çakışma):", self.combo_conflict_action)
+
+        self.lbl_conflict_hint = QLabel("🔄 Çakışma durumunda dosya 'dosya (1).ext' şeklinde güvenle yeniden adlandırılır.")
+        self.lbl_conflict_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
+        self.lbl_conflict_hint.setWordWrap(True)
+        f_gen.addRow("", self.lbl_conflict_hint)
 
         self.chk_auto_categorize = QCheckBox("Akıllı Otomatik Kategorizasyon (Videolar, Müzik, Belgeler klasörleme)")
         f_gen.addRow("", self.chk_auto_categorize)
@@ -259,11 +274,29 @@ class SettingsDialog(QDialog):
 
         lay_theme.addWidget(grp_theme)
 
-        lbl_theme_hint = QLabel("💡 Kaydet butonuna tıkladığınızda seçilen tema ve vurgu rengi RipSync pencerelerine anında uygulanır.")
+        grp_mode = QGroupBox("Arayüz Çalışma Modu & Rehber")
+        f_mode = QFormLayout(grp_mode)
+
+        self.combo_ui_mode = QComboBox()
+        self.combo_ui_mode.addItem("🟢 Basit Mod (Sade, temiz, yeni başlayanlar için)", "simple")
+        self.combo_ui_mode.addItem("⚡ Gelişmiş Mod (Tüm araçlar, zamanlayıcı, grafikler)", "advanced")
+        self.combo_ui_mode.currentIndexChanged.connect(self._on_ui_mode_changed)
+        f_mode.addRow("Arayüz Modu:", self.combo_ui_mode)
+
+        btn_restart_tour = QPushButton("🚀 Hızlı Başlangıç Rehberli Turunu Yeniden Başlat...")
+        btn_restart_tour.setObjectName("btn_secondary")
+        btn_restart_tour.setToolTip("İlk kurulumda gösterilen adımlı tanıtım ve ayar sihirbazını tekrar açar.")
+        btn_restart_tour.clicked.connect(self._restart_onboarding_tour)
+        f_mode.addRow("", btn_restart_tour)
+
+        lay_theme.addWidget(grp_mode)
+
+        lbl_theme_hint = QLabel("💡 Kaydet butonuna tıkladığınızda seçilen mod, tema ve vurgu rengi RipSync pencerelerine anında uygulanır.")
         lbl_theme_hint.setWordWrap(True)
         lbl_theme_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
         lay_theme.addWidget(lbl_theme_hint)
         lay_theme.addStretch()
+
         self.tabs.addTab(tab_theme, "🎨 Görünüm & Tema")
 
         # ==========================================
@@ -348,6 +381,32 @@ class SettingsDialog(QDialog):
         self.chk_pause_metered.setStyleSheet("color: #7dcfff; font-weight: bold;")
         f_power.addRow("", self.chk_pause_metered)
 
+        self.chk_suspend_if_active = QCheckBox("🛡️ Kullanıcı aktif kullanımdayken kapatma / uyku işlemini otomatik askıya al")
+        self.chk_suspend_if_active.setChecked(True)
+        self.chk_suspend_if_active.setStyleSheet("color: #9ece6a; font-weight: bold;")
+        f_power.addRow("", self.chk_suspend_if_active)
+
+        idle_box = QHBoxLayout()
+        self.spin_idle_threshold = QSpinBox()
+        self.spin_idle_threshold.setRange(10, 600)
+        self.spin_idle_threshold.setValue(60)
+        self.spin_idle_threshold.setSuffix(" sn")
+        self.spin_idle_threshold.setFixedWidth(80)
+        lbl_idle_desc = QLabel("(Son girdi bu süreden kısaysa sistem aktif kabul edilir)")
+        lbl_idle_desc.setStyleSheet("color: #7982a9; font-size: 11px;")
+        idle_box.addWidget(self.spin_idle_threshold)
+        idle_box.addWidget(lbl_idle_desc)
+        idle_box.addStretch()
+        f_power.addRow("Aktiflik Algılama Eşiği:", idle_box)
+
+        self.chk_power_desktop_notif = QCheckBox("🔔 Kapatma/uyku öncesinde Windows masaüstü bildirimi ve ses çal")
+        self.chk_power_desktop_notif.setChecked(True)
+        f_power.addRow("", self.chk_power_desktop_notif)
+
+        self.chk_power_browser_notif = QCheckBox("🌐 Kapatma/uyku öncesinde tarayıcıda bildirim ve görsel uyarı sayfası aç")
+        self.chk_power_browser_notif.setChecked(True)
+        f_power.addRow("", self.chk_power_browser_notif)
+
         lay_sp.addWidget(grp_power)
         lay_sp.addStretch()
         self.tabs.addTab(tab_speed_power, "⚡ Hız & Güç")
@@ -365,6 +424,10 @@ class SettingsDialog(QDialog):
         self.chk_clipboard = QCheckBox("Panoyu İzle (Kopyalanan bağlantıları sağ altta otomatik yakala)")
         f_integ.addRow("", self.chk_clipboard)
 
+        self.lbl_clip_privacy = QLabel("🔒 Gizlilik Koruması: Şifreler, kart numaraları ve özel metinler taranmaz veya bellekte tutulmaz.")
+        self.lbl_clip_privacy.setStyleSheet("color: #718096; font-size: 11px;")
+        f_integ.addRow("", self.lbl_clip_privacy)
+
         self.chk_clip_only_media = QCheckBox("🎯 Yalnızca doğrudan medya ve dosya uzantılarını yakala (Genel sayfaları yoksay)")
         f_integ.addRow("", self.chk_clip_only_media)
 
@@ -372,15 +435,58 @@ class SettingsDialog(QDialog):
         self.edit_clip_ignore.setPlaceholderText("google.com, bing.com, localhost (virgülle ayırın)")
         f_integ.addRow("Göz Ardı Edilecek Siteler (Kara Liste):", self.edit_clip_ignore)
 
+        port_row = QHBoxLayout()
         self.spin_port = QSpinBox()
         self.spin_port.setRange(1024, 65535)
         self.spin_port.setValue(28710)
-        f_integ.addRow("Chrome Eklenti Dinleme Portu:", self.spin_port)
+        btn_check_port = QPushButton("🔍 Müsaitlik Kontrolü")
+        btn_check_port.clicked.connect(self._check_port_availability)
+        self.lbl_port_check = QLabel("")
+        self.lbl_port_check.setStyleSheet("font-size: 11px; margin-left: 5px;")
+        self.spin_port.valueChanged.connect(lambda: self.lbl_port_check.setText(""))
 
-        btn_ext_guide = QPushButton("🌐 Tarayıcı Eklentisi Kurulum Kılavuzu...")
+        port_row.addWidget(self.spin_port, 1)
+        port_row.addWidget(btn_check_port, 0)
+        port_row.addWidget(self.lbl_port_check, 0)
+        f_integ.addRow("Chrome Eklenti Dinleme Portu:", port_row)
+
+        token_row = QHBoxLayout()
+        self.edit_bridge_token = QLineEdit()
+        self.edit_bridge_token.setReadOnly(True)
+        self.edit_bridge_token.setStyleSheet("color: #7aa2f7; font-family: monospace;")
+        btn_copy_token = QPushButton("📋 Kopyala")
+        btn_copy_token.clicked.connect(self._copy_bridge_token)
+        btn_regen_token = QPushButton("🔄 Yeni Üret")
+        btn_regen_token.clicked.connect(self._regenerate_bridge_token)
+        token_row.addWidget(self.edit_bridge_token, 1)
+        token_row.addWidget(btn_copy_token, 0)
+        token_row.addWidget(btn_regen_token, 0)
+        f_integ.addRow("Köprü Güvenlik Anahtarı (Token):", token_row)
+
+        ext_btn_row = QHBoxLayout()
+        ext_btn_row.setSpacing(8)
+
+        btn_ext_folder = QPushButton("📁 Eklenti Klasörünü Aç")
+        btn_ext_folder.setToolTip("Eklenti klasörünü Dosya Gezgini'nde açar ve yolunu kopyalar")
+        btn_ext_folder.clicked.connect(self._open_extension_folder)
+        ext_btn_row.addWidget(btn_ext_folder)
+
+        btn_ext_copy = QPushButton("📋 Yolunu Kopyala")
+        btn_ext_copy.setToolTip("Eklenti klasör yolunu panoya kopyalar")
+        btn_ext_copy.clicked.connect(self._copy_extension_folder_path)
+        ext_btn_row.addWidget(btn_ext_copy)
+
+        btn_ext_launch = QPushButton("🚀 Eklentiyle Başlat")
+        btn_ext_launch.setToolTip("Tarayıcınızı --load-extension ile doğrudan başlatır")
+        btn_ext_launch.clicked.connect(self._launch_browser_ext)
+        ext_btn_row.addWidget(btn_ext_launch)
+
+        btn_ext_guide = QPushButton("🌐 Görsel Rehber...")
         btn_ext_guide.setObjectName("btn_secondary")
         btn_ext_guide.clicked.connect(self._open_extension_guide)
-        f_integ.addRow("", btn_ext_guide)
+        ext_btn_row.addWidget(btn_ext_guide)
+
+        f_integ.addRow("Eklenti İşlemleri:", ext_btn_row)
 
         lay_integ.addWidget(grp_integ)
         lay_integ.addStretch()
@@ -441,10 +547,36 @@ class SettingsDialog(QDialog):
         hook_row.addWidget(self.btn_test_webhook)
         f_hook.addRow("Webhook URL:", hook_row)
 
-        lbl_hook_hint = QLabel("💡 Discord kanalı, Slack veya kendi REST API sunucunuza JSON formatında anlık indirme tamamlandı bildirimi gönderir.")
-        lbl_hook_hint.setWordWrap(True)
-        lbl_hook_hint.setStyleSheet("color: #7982a9; font-size: 11px;")
-        f_hook.addRow("", lbl_hook_hint)
+        self.chk_webhook_include_filepath = QCheckBox("Tam yerel dosya yolunu ({filepath}) bildirim verisine dahil et")
+        self.chk_webhook_include_filepath.setStyleSheet("color: #c0caf5;")
+        self.chk_webhook_include_filepath.setEnabled(False)
+        self.chk_webhook_include_filepath.toggled.connect(self._on_include_filepath_toggled)
+        f_hook.addRow("", self.chk_webhook_include_filepath)
+
+        # Güvenlik ve Gizlilik Uyarısı
+        warning_box = QFrame()
+        warning_box.setStyleSheet(
+            "QFrame { background-color: rgba(224, 175, 104, 0.12); border: 1px solid #e0af68; border-radius: 6px; padding: 10px; }"
+        )
+        lay_warn = QVBoxLayout(warning_box)
+        lay_warn.setContentsMargins(8, 8, 8, 8)
+        lay_warn.setSpacing(6)
+
+        lbl_warn_title = QLabel("⚠️ Gizlilik & Veri Güvenliği Uyarısı:")
+        lbl_warn_title.setStyleSheet("color: #e0af68; font-weight: bold; font-size: 11px;")
+        lay_warn.addWidget(lbl_warn_title)
+
+        lbl_warn_text = QLabel(
+            "Webhook bildirimleri etkinleştirildiğinde; dosya adı, dosya boyutu, kategori ve indirme bağlantısı (URL) "
+            "belirttiğiniz harici Webhook adresine (Discord, Slack, REST API vb.) HTTP POST isteğiyle gönderilir.\n\n"
+            "🔒 Kişisel klasör yapınızın ve kullanıcı adınızın dışarı sızmasını önlemek amacıyla "
+            "tam dosya yolu ({filepath}) varsayılan olarak gönderilmez."
+        )
+        lbl_warn_text.setWordWrap(True)
+        lbl_warn_text.setStyleSheet("color: #c0caf5; font-size: 11px; line-height: 1.4;")
+        lay_warn.addWidget(lbl_warn_text)
+
+        f_hook.addRow("", warning_box)
         lay_auto.addWidget(grp_hook)
 
         lay_auto.addStretch()
@@ -504,6 +636,31 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(btn_save)
         main_layout.addLayout(btn_layout)
 
+    def _toggle_advanced_tabs(self, visible: bool):
+        # Sekme İndeksleri:
+        # 0: Genel & Dosyalar
+        # 1: Ağ & Proxy (Gelişmiş)
+        # 2: Görünüm & Tema
+        # 3: Hız & Güç
+        # 4: Entegrasyon
+        # 5: Otomasyon & Webhook (Gelişmiş)
+        # 6: Site Kuralları (Gelişmiş)
+        self.tabs.setTabVisible(1, visible)
+        self.tabs.setTabVisible(5, visible)
+        self.tabs.setTabVisible(6, visible)
+
+    def _on_ui_mode_changed(self):
+        mode = self.combo_ui_mode.currentData()
+        is_adv = (mode == "advanced")
+        self.chk_show_advanced_tabs.setChecked(is_adv)
+        self._toggle_advanced_tabs(is_adv)
+
+    def _restart_onboarding_tour(self):
+        from ui.onboarding_dialog import OnboardingDialog
+        dlg = OnboardingDialog(self.db, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._load_settings()
+
     def _browse_dir(self):
         chosen = QFileDialog.getExistingDirectory(self, "Klasör Seç", self.edit_default_dir.text())
         if chosen:
@@ -527,9 +684,32 @@ class SettingsDialog(QDialog):
         self.spin_speed_limit.setValue(value)
         self.spin_speed_limit.blockSignals(False)
 
+    def _on_settings_spin_changed(self, value: int):
+        self.slider_speed_limit.blockSignals(True)
+        self.slider_speed_limit.setValue(min(value, self.slider_speed_limit.maximum()))
+        self.slider_speed_limit.blockSignals(False)
+
     def _toggle_webhook_fields(self, enabled: bool):
         self.edit_webhook_url.setEnabled(enabled)
         self.btn_test_webhook.setEnabled(enabled)
+        self.chk_webhook_include_filepath.setEnabled(enabled)
+
+    def _on_include_filepath_toggled(self, checked: bool):
+        if checked:
+            reply = QMessageBox.warning(
+                self,
+                "Gizlilik Uyarısı: Yerel Dosya Yolu Paylaşımı",
+                "Tam yerel dosya yolunu ({filepath}) webhook bildirimlerine dahil etmek;\n"
+                "bilgisayarınızdaki yerel kullanıcı adınızı, disk harfinizi ve klasör yapınızı "
+                "harici sunuculara (Discord/Slack vb.) sızdırabilir.\n\n"
+                "Bu bilginin dışarıya gönderilmesini onaylıyor musunuz?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self.chk_webhook_include_filepath.blockSignals(True)
+                self.chk_webhook_include_filepath.setChecked(False)
+                self.chk_webhook_include_filepath.blockSignals(False)
 
     def _test_webhook(self):
         url = self.edit_webhook_url.text().strip()
@@ -537,6 +717,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Uyarı", "Lütfen test etmek için geçerli bir Webhook URL adresi girin.")
             return
 
+        include_fp = self.chk_webhook_include_filepath.isChecked()
         test_context = {
             "{filename}": "Test_Dosyasi.zip",
             "{filepath}": "C:\\Downloads\\Test_Dosyasi.zip",
@@ -545,9 +726,14 @@ class SettingsDialog(QDialog):
             "{url}": "https://example.com/test_dosyasi.zip",
             "{status}": "Completed"
         }
-        success, msg = send_webhook_notification(url, test_context, timeout=5.0)
+        success, msg = send_webhook_notification(url, test_context, timeout=5.0, include_filepath=include_fp)
         if success:
-            QMessageBox.information(self, "Başarılı", f"✅ Webhook bildirimi başarıyla gönderildi!\n{msg}")
+            info_txt = f"✅ Webhook bildirimi başarıyla gönderildi!\n{msg}"
+            if not include_fp:
+                info_txt += "\n\n🔒 Not: Yerel dosya yolu gizlilik amacıyla bildirimden hariç tutuldu."
+            else:
+                info_txt += "\n\n⚠️ Not: Yerel dosya yolu bildirim verisine dahil edildi."
+            QMessageBox.information(self, "Başarılı", info_txt)
         else:
             QMessageBox.critical(self, "Hata", f"❌ Webhook gönderimi başarısız oldu:\n{msg}")
 
@@ -571,6 +757,7 @@ class SettingsDialog(QDialog):
         idx_ca = self.combo_conflict_action.findData(conflict_action)
         if idx_ca >= 0:
             self.combo_conflict_action.setCurrentIndex(idx_ca)
+        self._on_conflict_action_changed()
 
         auto_cat = self.db.get_setting("auto_categorize", True)
         self.chk_auto_categorize.setChecked(bool(auto_cat))
@@ -617,13 +804,15 @@ class SettingsDialog(QDialog):
 
         # Integration & Clipboard
         clip_cfg = self.db.get_clipboard_settings()
-        self.chk_clipboard.setChecked(bool(clip_cfg.get("enabled", True)))
+        self.chk_clipboard.setChecked(bool(clip_cfg.get("enabled", False)))
         self.chk_clip_only_media.setChecked(bool(clip_cfg.get("only_media", False)))
         ignores = clip_cfg.get("ignore_domains", [])
         self.edit_clip_ignore.setText(", ".join(ignores) if isinstance(ignores, list) else str(ignores))
 
         port = self.db.get_setting("extension_port", 28710)
         self.spin_port.setValue(int(port))
+        token = self.db.get_or_create_bridge_token()
+        self.edit_bridge_token.setText(token)
 
         # Proxy settings
         p_cfg = self.db.get_proxy_settings()
@@ -647,6 +836,19 @@ class SettingsDialog(QDialog):
         if idx_acc >= 0:
             self.combo_accent.setCurrentIndex(idx_acc)
 
+        # UI Mode (Basit / Gelişmiş)
+        ui_mode = self.db.get_ui_mode()
+        idx_um = self.combo_ui_mode.findData(ui_mode)
+        if idx_um >= 0:
+            self.combo_ui_mode.blockSignals(True)
+            self.combo_ui_mode.setCurrentIndex(idx_um)
+            self.combo_ui_mode.blockSignals(False)
+        is_adv = (ui_mode == "advanced")
+        self.chk_show_advanced_tabs.blockSignals(True)
+        self.chk_show_advanced_tabs.setChecked(is_adv)
+        self.chk_show_advanced_tabs.blockSignals(False)
+        self._toggle_advanced_tabs(is_adv)
+
         # Automation & Webhook settings
         auto_cfg = self.db.get_automation_settings()
         cmd_en = bool(auto_cfg.get("command_enabled", False))
@@ -658,6 +860,9 @@ class SettingsDialog(QDialog):
         self.chk_webhook_enabled.setChecked(wh_en)
         self._toggle_webhook_fields(wh_en)
         self.edit_webhook_url.setText(auto_cfg.get("webhook_url", ""))
+        self.chk_webhook_include_filepath.blockSignals(True)
+        self.chk_webhook_include_filepath.setChecked(bool(auto_cfg.get("webhook_include_filepath", False)))
+        self.chk_webhook_include_filepath.blockSignals(False)
 
         # Load Media & Cookies settings
         b_cookies = self.db.get_setting("browser_cookies", "")
@@ -674,9 +879,13 @@ class SettingsDialog(QDialog):
         e_meta = self.db.get_setting("embed_metadata", True)
         self.chk_embed_metadata.setChecked(bool(e_meta))
 
-        # Load Keep Awake
+        # Load Keep Awake & Power Safety
         ka_enabled = self.db.get_setting("keep_awake_enabled", True)
         self.chk_keep_awake.setChecked(bool(ka_enabled))
+        self.chk_suspend_if_active.setChecked(bool(self.db.get_setting("suspend_power_action_if_active", True)))
+        self.spin_idle_threshold.setValue(int(self.db.get_setting("active_idle_threshold_seconds", 60)))
+        self.chk_power_desktop_notif.setChecked(bool(self.db.get_setting("power_desktop_notification", True)))
+        self.chk_power_browser_notif.setChecked(bool(self.db.get_setting("power_browser_notification", True)))
 
         # Load Site Rules
         self._refresh_site_rules_table()
@@ -710,6 +919,18 @@ class SettingsDialog(QDialog):
             self.site_rules_mgr.remove_rule(domain)
             self._refresh_site_rules_table()
 
+    def _on_conflict_action_changed(self):
+        act = self.combo_conflict_action.currentData()
+        if act == "overwrite":
+            self.lbl_conflict_hint.setText("⚠️ 'Üzerine Yaz' seçildiğinde veri kaybını önlemek için indirme öncesinde onay istenir.")
+            self.lbl_conflict_hint.setStyleSheet("color: #f7768e; font-size: 11px; font-weight: bold;")
+        elif act == "skip":
+            self.lbl_conflict_hint.setText("⏭️ Aynı isimde dosya varsa indirme işlemi atlanır.")
+            self.lbl_conflict_hint.setStyleSheet("color: #ff9e64; font-size: 11px;")
+        else:
+            self.lbl_conflict_hint.setText("🔄 Çakışma durumunda dosya 'dosya (1).ext' şeklinde güvenle yeniden adlandırılır.")
+            self.lbl_conflict_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
+
     def _save_settings(self):
         self.db.set_setting("default_dir", self.edit_default_dir.text().strip())
         self.db.set_setting("connections", self.spin_connections.value())
@@ -737,6 +958,10 @@ class SettingsDialog(QDialog):
         self.db.set_setting("toast_notifications", self.chk_toast_notifications.isChecked())
         self.db.set_setting("sound_notifications", self.chk_sound_notifications.isChecked())
         self.db.set_setting("keep_awake_enabled", self.chk_keep_awake.isChecked())
+        self.db.set_setting("suspend_power_action_if_active", self.chk_suspend_if_active.isChecked())
+        self.db.set_setting("active_idle_threshold_seconds", self.spin_idle_threshold.value())
+        self.db.set_setting("power_desktop_notification", self.chk_power_desktop_notif.isChecked())
+        self.db.set_setting("power_browser_notification", self.chk_power_browser_notif.isChecked())
 
         # Duplicate Warning
         self.db.save_duplicate_warning_setting(self.chk_warn_duplicate.isChecked())
@@ -755,7 +980,35 @@ class SettingsDialog(QDialog):
             "ignore_domains": ignore_list
         })
         self.db.set_setting("clipboard_enabled", self.chk_clipboard.isChecked())
-        self.db.set_setting("extension_port", self.spin_port.value())
+        
+        # Check port conflict before saving
+        new_port = self.spin_port.value()
+        old_port = int(self.db.get_setting("extension_port", 28710))
+        if new_port != old_port:
+            from server.bridge_server import is_port_available
+            parent_srv = getattr(self.parent(), "bridge_server", None)
+            is_busy = not is_port_available("127.0.0.1", new_port)
+            if parent_srv and parent_srv.is_running and parent_srv.actual_port == new_port:
+                is_busy = False
+
+            if is_busy:
+                reply = QMessageBox.warning(
+                    self,
+                    "Port Çakışması Uyarısı",
+                    f"Seçtiğiniz {new_port} portu şu anda başka bir program tarafından kullanılıyor!\n\n"
+                    "Köprü sunucusu başlatılırken çakışma durumunda otomatik olarak müsait bir sonraki porta geçilecektir.\n\n"
+                    "Bu port ayarıyla devam etmek istiyor musunuz?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
+        self.db.set_setting("extension_port", new_port)
+
+        # Sync bridge config for unpacked browser extension
+        token = self.edit_bridge_token.text().strip()
+        from server.bridge_server import write_extension_config
+        write_extension_config(token=token, port=new_port)
 
         # Save Proxy
         self.db.save_proxy_settings({
@@ -767,25 +1020,95 @@ class SettingsDialog(QDialog):
             "password": self.edit_proxy_pass.text().strip()
         })
 
-        # Save Appearance
+        # Save Appearance & UI Mode
         self.db.save_theme_settings(
             theme=self.combo_theme.currentData(),
             accent=self.combo_accent.currentData()
         )
+        self.db.save_ui_mode(self.combo_ui_mode.currentData())
 
         # Save Post-Download Automation
         self.db.save_automation_settings({
             "command_enabled": self.chk_command_enabled.isChecked(),
             "command": self.edit_command.text().strip(),
             "webhook_enabled": self.chk_webhook_enabled.isChecked(),
-            "webhook_url": self.edit_webhook_url.text().strip()
+            "webhook_url": self.edit_webhook_url.text().strip(),
+            "webhook_include_filepath": self.chk_webhook_include_filepath.isChecked()
         })
 
         self.settings_saved.emit()
         self.accept()
 
+    def _copy_bridge_token(self):
+        from PyQt6.QtWidgets import QApplication, QMessageBox
+        token = self.edit_bridge_token.text().strip()
+        if token:
+            QApplication.clipboard().setText(token)
+            QMessageBox.information(self, "Kopyalandı", "Köprü güvenlik anahtarı (token) panoya kopyalandı!")
+
+    def _regenerate_bridge_token(self):
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Anahtarı Yenile",
+            "Güvenlik anahtarını yenilemek istediğinize emin misiniz?\n"
+            "Mevcut eklentiniz klasördeki config.json ile senkronize edilecektir.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            new_token = self.db.regenerate_bridge_token()
+            self.edit_bridge_token.setText(new_token)
+            from server.bridge_server import write_extension_config
+            write_extension_config(new_token, self.spin_port.value())
+            QMessageBox.information(self, "Başarılı", "Yeni köprü anahtarı üretildi ve eklenti klasörüne kaydedildi.")
+
     def _open_extension_guide(self):
         from ui.extension_guide_dialog import ExtensionGuideDialog
-        dlg = ExtensionGuideDialog(self, bridge_port=self.spin_port.value())
+        dlg = ExtensionGuideDialog(self, bridge_port=self.spin_port.value(), bridge_token=self.edit_bridge_token.text().strip())
         dlg.exec()
+
+    def _open_extension_folder(self):
+        from core.extension_installer import copy_extension_path_to_clipboard, get_extension_folder_path
+        from core.paths import show_in_explorer
+        ext_dir = get_extension_folder_path()
+        copy_extension_path_to_clipboard()
+        show_in_explorer(ext_dir)
+        QMessageBox.information(
+            self, "Klasör Açıldı 📁",
+            f"Eklenti klasörü Dosya Gezgini'nde açıldı ve yol kopyalandı:\n\n{ext_dir}"
+        )
+
+    def _copy_extension_folder_path(self):
+        from core.extension_installer import copy_extension_path_to_clipboard
+        success, path = copy_extension_path_to_clipboard()
+        if success:
+            QMessageBox.information(self, "Kopyalandı 📋", f"Eklenti yolu panoya kopyalandı:\n\n{path}")
+        else:
+            QMessageBox.warning(self, "Hata", f"Yol kopyalanamadı: {path}")
+
+    def _launch_browser_ext(self):
+        from core.extension_installer import launch_browser_with_extension
+        success, msg = launch_browser_with_extension()
+        if success:
+            QMessageBox.information(self, "Başarılı 🚀", f"{msg}\n\nEklenti tarayıcınıza otomatik yüklendi!")
+        else:
+            QMessageBox.warning(self, "Başlatılamadı", msg)
+
+    def _check_port_availability(self):
+        """Checks if the port configured in the spinbox is currently free or occupied."""
+        from server.bridge_server import is_port_available
+        target = self.spin_port.value()
+        parent_srv = getattr(self.parent(), "bridge_server", None)
+        if parent_srv and parent_srv.is_running and parent_srv.actual_port == target:
+            self.lbl_port_check.setText("🟢 Bu Port Zaten Aktif")
+            self.lbl_port_check.setStyleSheet("color: #9ece6a; font-weight: bold; font-size: 11px;")
+            return
+
+        if is_port_available("127.0.0.1", target):
+            self.lbl_port_check.setText("🟢 Port Müsait")
+            self.lbl_port_check.setStyleSheet("color: #9ece6a; font-weight: bold; font-size: 11px;")
+        else:
+            self.lbl_port_check.setText("🔴 Port Meşgul (Çakışma)")
+            self.lbl_port_check.setStyleSheet("color: #f7768e; font-weight: bold; font-size: 11px;")
+
 

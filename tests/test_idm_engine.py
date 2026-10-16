@@ -105,37 +105,47 @@ def run_tests():
     # 500KB at 500KB/s takes roughly 1s
     print(f"[OK] SpeedLimiter functional.")
 
-    print("\n=== 4. Testing Bridge Server (Chrome Extension API) ===")
+    print("\n=== 4. Testing Bridge Server (Chrome Extension API with Token Auth) ===")
     received_downloads = []
+    test_token = "test_bridge_secret_xyz"
     bridge = BridgeServer(
         host="127.0.0.1",
         port=28711,
+        auth_token=test_token,
         on_download_request=lambda d: received_downloads.append(d)
     )
     bridge.start()
     time.sleep(1)
 
     with httpx.Client() as client:
-        # Check /api/status
-        resp = client.get("http://127.0.0.1:28711/api/status")
+        # Check /api/status without token (should be 401 Unauthorized)
+        resp_unauth = client.get("http://127.0.0.1:28711/api/status")
+        assert resp_unauth.status_code == 401, f"Expected 401, got {resp_unauth.status_code}"
+        print("[OK] Unauthenticated status request correctly rejected (401)")
+
+        # Check /api/status with valid token
+        resp = client.get("http://127.0.0.1:28711/api/status", headers={"X-RipSync-Token": test_token})
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "online"
-        print(f"[OK] Bridge /api/status response: {data}")
+        assert data["authenticated"] is True
+        print(f"[OK] Bridge /api/status with token response: {data}")
 
-        # Send test download request
-        resp2 = client.post("http://127.0.0.1:28711/api/download", json={
-            "url": "https://example.com/file.zip",
-            "filename": "file.zip",
-            "referer": "https://example.com"
-        })
+        # Send test download request with valid token
+        resp2 = client.post("http://127.0.0.1:28711/api/download",
+                            headers={"X-RipSync-Token": test_token},
+                            json={
+                                "url": "https://example.com/file.zip",
+                                "filename": "file.zip",
+                                "referer": "https://example.com"
+                            })
         assert resp2.status_code == 200
         print(f"[OK] Bridge /api/download response: {resp2.json()}")
 
     time.sleep(0.5)
     assert len(received_downloads) == 1, "Download request not received by bridge"
     assert received_downloads[0]["filename"] == "file.zip"
-    print("[OK] Chrome Extension Bridge communication verified.")
+    print("[OK] Chrome Extension Bridge authenticated communication verified.")
     bridge.stop()
 
     print("\n=== 5. Testing Database Persistence ===")

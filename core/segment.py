@@ -4,8 +4,10 @@ import threading
 import httpx
 from typing import Optional, Callable
 from core.speed_limiter import SpeedLimiter
+from core.paths import to_long_path
 
 CHUNK_SIZE = 64 * 1024  # 64 KB
+FLUSH_EVERY = 1 * 1024 * 1024  # 1 MB
 
 class Segment(threading.Thread):
     def __init__(self,
@@ -100,11 +102,12 @@ class Segment(threading.Thread):
                         raise Exception(f"HTTP {response.status_code}: {response.reason_phrase}")
 
                     # Open target file for random access
-                    with open(self.save_path, "r+b") as f:
+                    with open(to_long_path(self.save_path), "r+b") as f:
                         f.seek(self.current_byte)
 
                         last_time = time.perf_counter()
                         last_bytes = 0
+                        bytes_since_flush = 0
 
                         for chunk in response.iter_bytes(chunk_size=CHUNK_SIZE):
                             if self._stop_event.is_set():
@@ -120,7 +123,10 @@ class Segment(threading.Thread):
 
                             f.seek(self.current_byte)
                             f.write(chunk)
-                            f.flush()
+                            bytes_since_flush += chunk_len
+                            if bytes_since_flush >= FLUSH_EVERY:
+                                f.flush()
+                                bytes_since_flush = 0
 
                             with self.lock:
                                 self.current_byte += chunk_len
@@ -144,6 +150,9 @@ class Segment(threading.Thread):
 
                             if self.end_byte >= 0 and self.current_byte > self.end_byte:
                                 break
+
+                        if bytes_since_flush > 0:
+                            f.flush()
 
             self.status = "completed"
             if self.on_complete:

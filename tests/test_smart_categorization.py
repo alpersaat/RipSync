@@ -67,9 +67,8 @@ def test_smart_categorization():
         print(f"[OK] {filename:<16} -> {cat:<12} -> {os.path.basename(target_dir) or 'Root'}")
 
     print("\n=== Testing QueueManager Auto Categorization Routing ===")
-    test_db_path = os.path.join(tempfile.gettempdir(), "test_categories.db")
-    if os.path.exists(test_db_path):
-        os.remove(test_db_path)
+    import uuid
+    test_db_path = os.path.join(tempfile.gettempdir(), f"test_cat_{uuid.uuid4().hex[:8]}.db")
 
     db = Database(test_db_path)
     db.set_setting("auto_categorize", True)

@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "RipSync - Download Manager Integration",
-  "version": "1.0.1",
-  "description": "Tarayıcı indirmelerini ve videoları otomatik olarak RipSync masaüstü uygulamasına aktarır.",
+  "version": "1.1.0",
+  "description": "Tarayıcı indirmelerini ve videoları güvenli token doğrulamasıyla RipSync masaüstü uygulamasına aktarır.",
   "permissions": [
     "downloads",
     "storage",
     "contextMenus",
     "activeTab",
-    "cookies"
+    "cookies",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>"

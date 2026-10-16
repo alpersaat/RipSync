@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QActionGroup
 from PyQt6.QtCore import pyqtSignal
-from core.notifier import notify_download_completed
+from core.notifier import notify_download_completed, notify_error, notify_warning
 
 import os
 from core.paths import get_icon_path
@@ -168,3 +168,28 @@ class TrayIcon(QSystemTrayIcon):
             QSystemTrayIcon.MessageIcon.Information,
             3000
         )
+
+    def notify_error(self, title: str, message: str):
+        # 1. Native Windows 10/11 Toast + sound
+        notify_error(title, message)
+
+        # 2. System Tray critical balloon
+        self.showMessage(
+            f"❌ {title}",
+            message[:150],
+            QSystemTrayIcon.MessageIcon.Critical,
+            4000
+        )
+
+    def notify_warning(self, title: str, message: str):
+        # 1. Native Windows 10/11 Toast
+        notify_warning(title, message)
+
+        # 2. System Tray warning balloon
+        self.showMessage(
+            f"⚠️ {title}",
+            message[:150],
+            QSystemTrayIcon.MessageIcon.Warning,
+            3500
+        )
+

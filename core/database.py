@@ -15,6 +15,10 @@ from core.categories import (
     get_category_folder,
     get_categorized_save_dir
 )
+from core.logger import get_logger
+from core.notifier import notify_error
+
+logger = get_logger("database")
 
 DB_PATH = get_database_path()
 
@@ -23,18 +27,47 @@ class Database:
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
         self.lock = threading.RLock()
-        self._mem_conn = None
-        if self.db_path == ":memory:":
-            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False, timeout=10)
-            self._mem_conn.row_factory = sqlite3.Row
+        self._conn = None
         self._init_db()
 
+    @property
+    def _mem_conn(self):
+        """Geriye dönük uyumluluk için bağlantı referansı."""
+        return self._conn
+
+    @_mem_conn.setter
+    def _mem_conn(self, val):
+        self._conn = val
+
     def _get_connection(self):
-        if self._mem_conn is not None:
-            return self._mem_conn
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """
+        Tek kalıcı SQLite bağlantısı (persistent connection) döner.
+        check_same_thread=False ve threading.RLock ile thread-safe çalışır.
+        Dosya tabanlı SQLite için WAL modunu etkinleştirir.
+        """
+        with self.lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+                if self.db_path != ":memory:":
+                    try:
+                        self._conn.execute("PRAGMA journal_mode=WAL;")
+                        self._conn.execute("PRAGMA synchronous=NORMAL;")
+                        self._conn.execute("PRAGMA busy_timeout=30000;")
+                    except Exception as e:
+                        logger.debug(f"SQLite PRAGMA optimizasyonları uygulanamadı: {e}")
+            return self._conn
+
+    def close(self):
+        """Açık olan veritabanı bağlantısını güvenli bir şekilde kapatır."""
+        with self.lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception as e:
+                    logger.debug(f"Veritabanı bağlantısı kapatılırken hata: {e}")
+                finally:
+                    self._conn = None
 
     def _init_db(self):
         with self.lock:
@@ -62,30 +95,22 @@ class Database:
                     priority TEXT DEFAULT 'normal'
                 )
                 """)
-                try:
-                    conn.execute("ALTER TABLE downloads ADD COLUMN queue_order INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE downloads ADD COLUMN auto_open INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE downloads ADD COLUMN auto_extract INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE downloads ADD COLUMN priority TEXT DEFAULT 'normal'")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE downloads ADD COLUMN tags TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE downloads ADD COLUMN queue_id TEXT DEFAULT 'default'")
-                except sqlite3.OperationalError:
-                    pass
+                columns_to_add = [
+                    ("queue_order", "INTEGER DEFAULT 0"),
+                    ("auto_open", "INTEGER DEFAULT 0"),
+                    ("auto_extract", "INTEGER DEFAULT 0"),
+                    ("priority", "TEXT DEFAULT 'normal'"),
+                    ("tags", "TEXT DEFAULT ''"),
+                    ("queue_id", "TEXT DEFAULT 'default'"),
+                ]
+                for col_name, col_type in columns_to_add:
+                    try:
+                        conn.execute(f"ALTER TABLE downloads ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" in str(e).lower():
+                            logger.debug(f"Sütun zaten mevcut: {col_name}")
+                        else:
+                            logger.warning(f"Sütun eklenirken uyarı ({col_name}): {e}")
 
                 conn.execute("""
                 CREATE TABLE IF NOT EXISTS download_queues (
@@ -122,21 +147,26 @@ class Database:
         headers_json = json.dumps(headers or {})
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        with self.lock:
-            with self._get_connection() as conn:
-                cur = conn.execute("SELECT COALESCE(MAX(queue_order), 0) + 1 AS next_order FROM downloads")
-                row = cur.fetchone()
-                next_order = row["next_order"] if row else 1
+        try:
+            with self.lock:
+                with self._get_connection() as conn:
+                    cur = conn.execute("SELECT COALESCE(MAX(queue_order), 0) + 1 AS next_order FROM downloads")
+                    row = cur.fetchone()
+                    next_order = row["next_order"] if row else 1
 
-                conn.execute("""
-                INSERT INTO downloads (id, url, filename, save_path, total_size, downloaded_size,
-                                       status, category, connections, date_added, headers_json, queue_order,
-                                       auto_open, auto_extract, priority, tags, queue_id)
-                VALUES (?, ?, ?, ?, ?, 0, 'Queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (download_id, url, filename, save_path, total_size, category, connections, now,
-                      headers_json, next_order, 1 if auto_open else 0, 1 if auto_extract else 0, priority, tags, queue_id or "default"))
-                conn.commit()
-        return download_id
+                    conn.execute("""
+                    INSERT INTO downloads (id, url, filename, save_path, total_size, downloaded_size,
+                                           status, category, connections, date_added, headers_json, queue_order,
+                                           auto_open, auto_extract, priority, tags, queue_id)
+                    VALUES (?, ?, ?, ?, ?, 0, 'Queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (download_id, url, filename, save_path, total_size, category, connections, now,
+                          headers_json, next_order, 1 if auto_open else 0, 1 if auto_extract else 0, priority, tags, queue_id or "default"))
+                    conn.commit()
+            return download_id
+        except sqlite3.Error as e:
+            logger.error(f"İndirme veritabanına eklenemedi ({filename}): {e}", exc_info=True)
+            notify_error("Veritabanı Hatası", f"İndirme kaydedilemedi: {e}")
+            raise
 
     ALLOWED_UPDATE_COLUMNS = {
         "url", "filename", "save_path", "total_size", "downloaded_size",
@@ -159,11 +189,44 @@ class Database:
         values.append(download_id)
 
         query = f"UPDATE downloads SET {', '.join(fields)} WHERE id = ?"
-        with self.lock:
-            with self._get_connection() as conn:
-                # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
-                conn.execute(query, values)
-                conn.commit()
+        try:
+            with self.lock:
+                with self._get_connection() as conn:
+                    # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+                    conn.execute(query, values)
+                    conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"İndirme veritabanında güncellenemedi ({download_id}): {e}", exc_info=True)
+            if "status" not in kwargs or kwargs["status"] != "Error":
+                notify_error("Veritabanı Güncelleme Hatası", f"Kayıt güncellenemedi: {e}")
+
+    def update_downloads_batch(self, updates: List[Dict[str, Any]]):
+        """
+        Birden çok indirme kaydını (özellikle toplu ilerleme güncellemelerini)
+        tek bir veritabanı transaction'ı içinde günceller.
+        """
+        if not updates:
+            return
+        try:
+            with self.lock:
+                with self._get_connection() as conn:
+                    for item in updates:
+                        dl_id = item.get("id")
+                        if not dl_id:
+                            continue
+                        fields = []
+                        values = []
+                        for key, val in item.items():
+                            if key != "id" and key in self.ALLOWED_UPDATE_COLUMNS:
+                                fields.append(f"{key} = ?")
+                                values.append(val)
+                        if fields:
+                            values.append(dl_id)
+                            query = f"UPDATE downloads SET {', '.join(fields)} WHERE id = ?"
+                            conn.execute(query, values)
+                    conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Toplu indirme güncellenirken hata oluştu: {e}", exc_info=True)
 
     def get_download(self, download_id: str) -> Optional[Dict[str, Any]]:
         with self.lock:
@@ -216,10 +279,14 @@ class Database:
         return sorted(list(tags_set))
 
     def delete_download(self, download_id: str):
-        with self.lock:
-            with self._get_connection() as conn:
-                conn.execute("DELETE FROM downloads WHERE id = ?", (download_id,))
-                conn.commit()
+        try:
+            with self.lock:
+                with self._get_connection() as conn:
+                    conn.execute("DELETE FROM downloads WHERE id = ?", (download_id,))
+                    conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"İndirme veritabanından silinemedi ({download_id}): {e}", exc_info=True)
+            notify_error("Veritabanı Hatası", f"İndirme kaydı silinemedi: {e}")
 
     def get_setting(self, key: str, default: Any = None) -> Any:
         with self.lock:
@@ -229,16 +296,35 @@ class Database:
                 if row:
                     try:
                         return json.loads(row["value"])
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Ayar JSON ayrıştırma hatası ({key}): {e}")
                         return row["value"]
         return default
 
     def set_setting(self, key: str, value: Any):
         val_str = json.dumps(value)
-        with self.lock:
-            with self._get_connection() as conn:
-                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, val_str))
-                conn.commit()
+        try:
+            with self.lock:
+                with self._get_connection() as conn:
+                    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, val_str))
+                    conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Ayar veritabanına kaydedilemedi ({key}): {e}", exc_info=True)
+            notify_error("Ayar Kayıt Hatası", f"Ayar kaydedilemedi: {e}")
+
+    def get_or_create_bridge_token(self) -> str:
+        token = self.get_setting("bridge_token")
+        if not token:
+            import secrets
+            token = secrets.token_hex(24)
+            self.set_setting("bridge_token", token)
+        return token
+
+    def regenerate_bridge_token(self) -> str:
+        import secrets
+        token = secrets.token_hex(24)
+        self.set_setting("bridge_token", token)
+        return token
 
     def get_queued_downloads_ordered(self) -> List[Dict[str, Any]]:
         with self.lock:
@@ -455,7 +541,8 @@ class Database:
             "command_enabled": False,
             "command": "",
             "webhook_enabled": False,
-            "webhook_url": ""
+            "webhook_url": "",
+            "webhook_include_filepath": False
         }
         val = self.get_setting("post_download_automation", None)
         if isinstance(val, dict):
@@ -604,9 +691,10 @@ class Database:
     # ==========================================
     def get_clipboard_settings(self) -> Dict[str, Any]:
         default = {
-            "enabled": True,
+            "enabled": False,
             "only_media": False,
-            "ignore_domains": ["google.com", "bing.com", "yandex.com", "duckduckgo.com", "localhost", "127.0.0.1"]
+            "ignore_domains": ["google.com", "bing.com", "yandex.com", "duckduckgo.com", "localhost", "127.0.0.1"],
+            "prompted": False
         }
         val = self.get_setting("clipboard_config", None)
         if isinstance(val, dict):
@@ -617,6 +705,9 @@ class Database:
         old_en = self.get_setting("clipboard_enabled", None)
         if old_en is not None:
             default["enabled"] = bool(old_en)
+        old_prompted = self.get_setting("clipboard_prompted", None)
+        if old_prompted is not None:
+            default["prompted"] = bool(old_prompted)
         return default
 
     def save_clipboard_settings(self, settings: Dict[str, Any]):
@@ -625,6 +716,8 @@ class Database:
         self.set_setting("clipboard_config", current)
         if "enabled" in settings:
             self.set_setting("clipboard_enabled", bool(settings["enabled"]))
+        if "prompted" in settings:
+            self.set_setting("clipboard_prompted", bool(settings["prompted"]))
 
     # ==========================================
     # Tarifeli Bağlantı (Metered Connection) Ayarları
@@ -644,4 +737,23 @@ class Database:
         current = self.get_metered_settings()
         current.update(settings)
         self.set_setting("metered_connection", current)
+
+    # ==========================================
+    # Arayüz Modu (Basit / Gelişmiş) & Onboarding
+    # ==========================================
+    def get_ui_mode(self) -> str:
+        """Returns 'simple' or 'advanced'. Defaults to 'simple'."""
+        mode = self.get_setting("ui_mode", "simple")
+        return mode if mode in ("simple", "advanced") else "simple"
+
+    def save_ui_mode(self, mode: str):
+        clean_mode = "advanced" if mode == "advanced" else "simple"
+        self.set_setting("ui_mode", clean_mode)
+
+    def is_onboarding_completed(self) -> bool:
+        return bool(self.get_setting("onboarding_completed", False))
+
+    def set_onboarding_completed(self, completed: bool = True):
+        self.set_setting("onboarding_completed", bool(completed))
+
 

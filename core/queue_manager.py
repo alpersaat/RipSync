@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import json
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
@@ -7,11 +8,15 @@ from core.database import Database
 from core.categories import detect_category, get_categorized_save_dir
 from core.downloader import MultiThreadDownloader
 from core.stream_downloader import StreamDownloader, is_stream_url
-from core.paths import resolve_file_conflict, sanitize_filename
+from core.paths import resolve_file_conflict, sanitize_filename, get_disk_free_space, is_path_too_long, suggest_short_download_dir, to_long_path
 from core.post_download import execute_post_download
 from core.scheduler import DownloadScheduler
 from core.power_manager import set_keep_awake
 from core.metered_connection import is_metered_connection
+from core.logger import get_logger
+from core.notifier import notify_error, notify_warning
+
+logger = get_logger("queue_manager")
 
 PRIORITY_WEIGHTS = {
     "high": 3.0,
@@ -30,6 +35,11 @@ class QueueManager:
         self.lock = threading.Lock()
         self.scheduler: Optional[DownloadScheduler] = None
         self.metered_bypass = False
+
+        # İlerleme güncellemelerini bellekte biriktirme (throttling / batching)
+        self._progress_cache: Dict[str, Dict[str, Any]] = {}
+        self._last_progress_db_sync: Dict[str, float] = {}
+        self._progress_sync_interval: float = 1.0  # saniye
 
         # Callbacks for UI updates
         self.on_task_progress: Optional[Callable[[str, int, int, float, int], None]] = None
@@ -161,10 +171,19 @@ class QueueManager:
         stored_headers = dict(headers or {})
         stored_headers["quality"] = quality
 
+        full_save_path = os.path.join(effective_dir, effective_filename)
+        if is_path_too_long(full_save_path):
+            short_dir = suggest_short_download_dir()
+            notify_warning(
+                "Kayıt yolu çok uzun",
+                f"Hedef yol 260 karakteri geçti ({len(full_save_path)} kr). "
+                f"Kısa bir indirme klasörü kullanmayı deneyin: {short_dir}"
+            )
+
         download_id = self.db.add_download(
             url=url,
             filename=effective_filename,
-            save_path=os.path.join(effective_dir, effective_filename),
+            save_path=full_save_path,
             connections=connections,
             category=cat if filename else None,
             headers=stored_headers,
@@ -233,11 +252,23 @@ class QueueManager:
             f_name = filename or record["filename"]
             conns = connections or record.get("connections", 8)
 
+            # Check free disk space before starting download
+            free_sp = get_disk_free_space(s_dir)
+            if free_sp >= 0 and free_sp < 10 * 1024 * 1024:  # Under 10 MB
+                err_msg = f"Yetersiz disk alanı ({free_sp // (1024*1024)} MB kaldı)"
+                logger.error(f"İndirme başlatılamadı, hedef sürücüde disk dolu: {s_dir} ({f_name})")
+                self.db.update_download(download_id, status="Error", error_message=err_msg)
+                if self.on_task_status:
+                    self.on_task_status(download_id, "Error", err_msg)
+                notify_error("Yetersiz Disk Alanı", f"'{f_name}' indirilemiyor: Hedef sürücüde yeterli boş alan yok.")
+                return
+
             req_headers = dict(headers or {})
             if not req_headers and record.get("headers_json"):
                 try:
                     req_headers = json.loads(record["headers_json"])
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Headers JSON ayrıştırma hatası ({download_id}): {e}")
                     req_headers = {}
 
             sel_quality = quality or req_headers.get("quality") or self.db.get_setting("preferred_quality", "max")
@@ -295,12 +326,13 @@ class QueueManager:
         self._update_keep_awake()
 
     def pause_download(self, download_id: str):
+        self.flush_progress(download_id)
         with self.lock:
             dl = self.active_downloaders.get(download_id)
             if dl:
                 dl.pause()
             else:
-                self.db.update_download(download_id, status="Paused")
+                self.db.update_download(download_id, status="Paused", speed=0, eta=0)
                 if self.on_task_status:
                     self.on_task_status(download_id, "Paused", "")
         # A slot freed up; check queue to schedule next waiting item
@@ -349,27 +381,34 @@ class QueueManager:
                 self.on_task_status(download_id, "Paused", "")
             return True
 
-    def cancel_download(self, download_id: str):
+    def cancel_download(self, download_id: str, delete_file: bool = False):
         with self.lock:
+            self._progress_cache.pop(download_id, None)
+            self._last_progress_db_sync.pop(download_id, None)
             dl = self.active_downloaders.pop(download_id, None)
             if dl:
-                dl.cancel()
-        self.db.update_download(download_id, status="Cancelled")
+                try:
+                    dl.cancel(delete_file=delete_file)
+                except TypeError:
+                    dl.cancel()
+        self.db.update_download(download_id, status="Cancelled", speed=0, eta=0)
         if self.on_task_status:
             self.on_task_status(download_id, "Cancelled", "")
         self._check_queue()
         self._update_keep_awake()
 
     def delete_download(self, download_id: str, delete_file: bool = False):
-        self.cancel_download(download_id)
+        self.cancel_download(download_id, delete_file=delete_file)
         record = self.db.get_download(download_id)
         if record and delete_file:
-            path = record["save_path"]
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except Exception:
-                pass
+            path = record.get("save_path") if isinstance(record, dict) else (record["save_path"] if record else None)
+            if path:
+                for p in (path, f"{path}.part", f"{path}.ytdl"):
+                    try:
+                        if os.path.exists(to_long_path(p)):
+                            os.remove(to_long_path(p))
+                    except Exception as e:
+                        logger.warning(f"Dosya diskten silinemedi ({p}): {e}")
         self.db.delete_download(download_id)
 
     def start_queue(self, queue_id: Optional[str] = None):
@@ -387,6 +426,7 @@ class QueueManager:
 
     def pause_queue(self, queue_id: Optional[str] = None):
         """Pauses currently active downloads. If queue_id provided, only pauses that queue's downloads."""
+        self.flush_progress()
         with self.lock:
             for did, dl in list(self.active_downloaders.items()):
                 if queue_id:
@@ -437,14 +477,52 @@ class QueueManager:
         if action in ("shutdown", "sleep") and self.on_scheduler_power_action:
             self.on_scheduler_power_action(action)
 
+    def flush_progress(self, download_id: Optional[str] = None):
+        """
+        Bellekte biriktirilen indirme ilerleme verilerini veritabanına yazar.
+        download_id verilmezse bellekteki tüm bekleyen ilerlemeleri tek bir batch ile kaydeder.
+        """
+        updates = []
+        with self.lock:
+            if download_id:
+                data = self._progress_cache.get(download_id)
+                if data:
+                    updates.append({"id": download_id, **data})
+                    self._last_progress_db_sync[download_id] = time.monotonic()
+            else:
+                now = time.monotonic()
+                for did, data in list(self._progress_cache.items()):
+                    updates.append({"id": did, **data})
+                    self._last_progress_db_sync[did] = now
+
+        if updates:
+            self.db.update_downloads_batch(updates)
+
     def _on_progress(self, download_id: str, downloaded: int, total: int, speed: float, eta: int):
-        self.db.update_download(
-            download_id,
-            downloaded_size=downloaded,
-            total_size=total,
-            speed=int(speed),
-            eta=eta
-        )
+        now = time.monotonic()
+        should_sync = False
+        with self.lock:
+            self._progress_cache[download_id] = {
+                "downloaded_size": downloaded,
+                "total_size": total,
+                "speed": int(speed),
+                "eta": eta
+            }
+            last_sync = self._last_progress_db_sync.get(download_id, 0.0)
+            if (now - last_sync) >= self._progress_sync_interval:
+                should_sync = True
+                self._last_progress_db_sync[download_id] = now
+
+        if should_sync:
+            self.db.update_download(
+                download_id,
+                downloaded_size=downloaded,
+                total_size=total,
+                speed=int(speed),
+                eta=eta
+            )
+
+        # UI/arayüz akıcılığı için anlık ilerleme sinyali her zaman iletilir
         if self.on_task_progress:
             self.on_task_progress(download_id, downloaded, total, speed, eta)
 
@@ -455,13 +533,25 @@ class QueueManager:
     def _on_status(self, download_id: str, status: str, error: str):
         # Update filename, path, and category in db if probe resolved them
         with self.lock:
+            cached_prog = self._progress_cache.pop(download_id, None)
+            self._last_progress_db_sync.pop(download_id, None)
             dl = self.active_downloaders.get(download_id)
             extra_kwargs = {}
+            if cached_prog:
+                extra_kwargs["downloaded_size"] = cached_prog["downloaded_size"]
+                extra_kwargs["total_size"] = cached_prog["total_size"]
+            if status in ("Completed", "Cancelled", "Error", "Paused"):
+                extra_kwargs["speed"] = 0
+                extra_kwargs["eta"] = 0
+
             if status == "Completed":
                 extra_kwargs["date_completed"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             if dl and dl.filename:
                 cat = detect_category(dl.filename)
+                # extra_kwargs içinde zaten 'total_size' olabilir (progress cache'ten).
+                # Çift değer geçilmesi TypeError yaratır → açık geçilen değer önceliklidir.
+                extra_kwargs.pop("total_size", None)
                 self.db.update_download(
                     download_id,
                     filename=dl.filename,

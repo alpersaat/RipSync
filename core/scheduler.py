@@ -318,15 +318,23 @@ class DownloadScheduler:
                 try:
                     self.on_speed_limit_change(0)
                 except Exception as e:
-                    print(f"[DownloadScheduler] Error resetting speed limit: {e}")
+                    try:
+                        from core.logger import get_logger
+                        get_logger("scheduler").warning(f"Hız limiti sıfırlanırken hata: {e}")
+                    except Exception:
+                        pass
 
         if not queue_en:
             self._last_window_state = False
             if self.on_tick:
                 try:
                     self.on_tick(self.get_status(now_dt))
-                except Exception:
-                    pass
+                except Exception as e:
+                    try:
+                        from core.logger import get_logger
+                        get_logger("scheduler").debug(f"Zamanlayıcı tick callback hatası: {e}")
+                    except Exception:
+                        pass
             return
 
         status = self.get_status(now_dt)

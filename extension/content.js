@@ -332,6 +332,7 @@
 
   let pollIntervalId = null;
   let observer = null;
+  let mutationPending = false;
 
   function teardown() {
     if (pollIntervalId) {
@@ -635,15 +636,21 @@
   // Initial scan
   scanMedia();
 
-  // MutationObserver scan for dynamically loaded video elements
+  // MutationObserver scan for dynamically loaded video elements.
+  // Debounced: mutation-heavy pages don't re-scan on every microtask.
   try {
     observer = new MutationObserver(() => {
       if (!isContextValid()) {
         teardown();
         return;
       }
-      scanMedia();
-      scheduleUpdate();
+      if (mutationPending) return;
+      mutationPending = true;
+      setTimeout(() => {
+        mutationPending = false;
+        scanMedia();
+        scheduleUpdate();
+      }, 300);
     });
     observer.observe(document.body || document.documentElement, {
       childList: true,
@@ -657,14 +664,17 @@
   document.addEventListener("fullscreenchange", updateAll);
   document.addEventListener("webkitfullscreenchange", updateAll);
 
-  // Layout changes that fire no event (theater mode, lazy layout, SPA nav)
+  // Layout changes that fire no event (theater mode, lazy layout, SPA nav).
+  // 2 s instead of 300 ms, and skipped entirely when no button is tracked
+  // (i.e. pages without videos do not poll at all).
   pollIntervalId = setInterval(() => {
     if (!isContextValid()) {
       teardown();
       return;
     }
+    if (tracked.size === 0) return;
     scheduleUpdate();
-  }, 300);
+  }, 2000);
 
   // Also scan on media play
   document.addEventListener("play", (e) => {

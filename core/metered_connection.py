@@ -46,10 +46,19 @@ def is_metered_connection() -> bool:
                                 return True
                         except FileNotFoundError:
                             pass
-                except Exception:
+                except Exception as e:
+                    try:
+                        from core.logger import get_logger
+                        get_logger("metered").debug(f"Ağ profili anahtarı okunamadı: {e}")
+                    except Exception:
+                        pass
                     continue
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            from core.logger import get_logger
+            get_logger("metered").debug(f"Registry NetworkList okunamadı: {e}")
+        except Exception:
+            pass
 
     # Strategy 2: Check active WLAN profile cost via netsh if available
     try:
@@ -67,8 +76,12 @@ def is_metered_connection() -> bool:
             for line in lines:
                 if "cost" in line.lower() and ("fixed" in line.lower() or "variable" in line.lower() or "metered" in line.lower()):
                     return True
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            from core.logger import get_logger
+            get_logger("metered").debug(f"Netsh wlan sorgusu başarısız: {e}")
+        except Exception:
+            pass
 
     return False
 

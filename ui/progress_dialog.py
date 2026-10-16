@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QProgressBar, QPushButton, QWidget, QFrame, QGridLayout,
-    QSlider, QCheckBox, QComboBox, QGroupBox
+    QSlider, QCheckBox, QComboBox, QGroupBox, QMessageBox
 )
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QLinearGradient, QFont
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
@@ -98,7 +98,8 @@ class SegmentVisualizerWidget(QWidget):
 class ProgressDialog(QDialog):
     pause_requested = pyqtSignal(str)
     resume_requested = pyqtSignal(str)
-    cancel_requested = pyqtSignal(str)
+    cancel_requested = pyqtSignal([str], [str, bool])
+    refresh_url_requested = pyqtSignal(str)  # download_id
     speed_limit_changed = pyqtSignal(str, int)  # download_id, bytes_per_sec (0 for unlimited)
     auto_open_changed = pyqtSignal(str, bool)    # download_id, auto_open flag
 
@@ -241,6 +242,26 @@ class ProgressDialog(QDialog):
 
         # Buttons
         btn_layout = QHBoxLayout()
+
+        self.btn_manual_link = QPushButton("🔗 Manuel Link Gir / Yenile")
+        self.btn_manual_link.setStyleSheet("""
+            QPushButton {
+                background-color: #ff9e64;
+                color: #1a1b26;
+                font-weight: bold;
+                padding: 6px 14px;
+                border-radius: 6px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #e0af68;
+            }
+        """)
+        self.btn_manual_link.setToolTip("İndirme hata verdiğinde yeni veya doğrudan video bağlantısını girmenizi sağlar")
+        self.btn_manual_link.clicked.connect(lambda: self.refresh_url_requested.emit(self.download_id))
+        self.btn_manual_link.hide()
+        btn_layout.addWidget(self.btn_manual_link)
+
         btn_layout.addStretch()
 
         self.btn_pause = QPushButton("Duraklat")
@@ -307,8 +328,48 @@ class ProgressDialog(QDialog):
             self.pause_requested.emit(self.download_id)
 
     def _on_cancel(self):
-        self.cancel_requested.emit(self.download_id)
-        self.close()
+        if self.lbl_status.text() == "Completed" or self.prog_bar.value() == 100:
+            self.close()
+            return
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("İndirmeyi İptal Et - RipSync")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setText("<h3>İndirmeyi iptal etmek yerine duraklatmak ister misiniz?</h3>")
+        msg_box.setInformativeText(
+            "Duraklatırsanız indirilen kısımlar diskte korunur ve dilediğiniz zaman kaldığı yerden devam edebilirsiniz.\n\n"
+            "İptal ederseniz indirme süreci sonlandırılacaktır."
+        )
+
+        btn_pause = msg_box.addButton("⏸️ Duraklat (Önerilen)", QMessageBox.ButtonRole.AcceptRole)
+        btn_cancel_keep = msg_box.addButton("⏹️ İptal Et (Dosyayı Koru)", QMessageBox.ButtonRole.ActionRole)
+        btn_cancel_delete = msg_box.addButton("🗑️ İptal Et ve Dosyayı Sil", QMessageBox.ButtonRole.DestructiveRole)
+        btn_dismiss = msg_box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)
+
+        try:
+            msg_box.setDefaultButton(btn_pause)
+        except Exception:
+            pass
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == btn_pause:
+            self.is_paused = True
+            self.btn_pause.setText("Devam Et")
+            self.pause_requested.emit(self.download_id)
+            self.close()
+        elif clicked == btn_cancel_keep:
+            try:
+                self.cancel_requested[str, bool].emit(self.download_id, False)
+            except Exception:
+                self.cancel_requested.emit(self.download_id)
+            self.close()
+        elif clicked == btn_cancel_delete:
+            try:
+                self.cancel_requested[str, bool].emit(self.download_id, True)
+            except Exception:
+                self.cancel_requested.emit(self.download_id)
+            self.close()
 
     def update_progress(self, downloaded: int, total: int, speed: float, eta: int):
         if total > 0:
@@ -333,13 +394,22 @@ class ProgressDialog(QDialog):
             self.prog_bar.setValue(100)
             self.lbl_speed.setText("Tamamlandı")
             self.lbl_eta.setText("0 sn")
+            self.btn_manual_link.hide()
         elif status == "Paused":
             self.lbl_status.setStyleSheet("color: #e0af68; font-weight: bold;")
             self.btn_pause.setText("Devam Et")
             self.is_paused = True
+            self.btn_manual_link.hide()
         elif status == "Downloading":
             self.lbl_status.setStyleSheet("color: #7aa2f7; font-weight: bold;")
             self.btn_pause.setText("Duraklat")
             self.is_paused = False
+            self.btn_manual_link.hide()
         elif status == "Error":
             self.lbl_status.setStyleSheet("color: #f7768e; font-weight: bold;")
+            self.lbl_status.setWordWrap(True)
+            if err:
+                self.lbl_status.setToolTip(err)
+            self.btn_manual_link.show()
+        else:
+            self.btn_manual_link.hide()

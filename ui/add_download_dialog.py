@@ -366,6 +366,43 @@ class AddDownloadDialog(QDialog):
         fname = self.edit_filename.text().strip()
         fdir = self.edit_dir.text().strip()
         if fname and fdir and os.path.exists(os.path.join(fdir, fname)):
+            conflict_action = self.db.get_conflict_setting() if self.db else "auto_rename"
+            if conflict_action == "overwrite":
+                self.banner_conflict.setText("⚠️ Dikkat: Bu isimde bir dosya klasörde zaten var! Çakışma ayarınız 'Üzerine Yaz' olduğu için mevcut dosya silinecektir.")
+                self.banner_conflict.setStyleSheet("""
+                    QLabel {
+                        background-color: #3b1f1f;
+                        color: #f7768e;
+                        font-weight: bold;
+                        padding: 6px 12px;
+                        border-radius: 6px;
+                        border: 1px solid #f7768e;
+                    }
+                """)
+            elif conflict_action == "skip":
+                self.banner_conflict.setText("⏭️ Bu isimde bir dosya klasörde zaten var! Çakışma ayarınız 'İndirmeyi Atla' olarak ayarlanmış.")
+                self.banner_conflict.setStyleSheet("""
+                    QLabel {
+                        background-color: #2b221a;
+                        color: #ff9e64;
+                        font-weight: bold;
+                        padding: 6px 12px;
+                        border-radius: 6px;
+                        border: 1px solid #ff9e64;
+                    }
+                """)
+            else:
+                self.banner_conflict.setText("🔄 Bu isimde bir dosya klasörde zaten var! RipSync ayarlarınıza göre otomatik adlandırılacak.")
+                self.banner_conflict.setStyleSheet("""
+                    QLabel {
+                        background-color: #1a2b3c;
+                        color: #7dcfff;
+                        font-weight: bold;
+                        padding: 6px 12px;
+                        border-radius: 6px;
+                        border: 1px solid #3d59a1;
+                    }
+                """)
             self.banner_conflict.show()
         else:
             self.banner_conflict.hide()
@@ -392,6 +429,21 @@ class AddDownloadDialog(QDialog):
                 elif action == DuplicateDownloadDialog.ACTION_OPEN_EXISTING:
                     self.reject()
                     return
+
+        # Overwrite file conflict confirmation check
+        conflict_action = self.db.get_conflict_setting() if self.db else "auto_rename"
+        target_path = os.path.join(target_dir, fname_final) if (target_dir and fname_final) else ""
+        if conflict_action == "overwrite" and target_path and os.path.exists(target_path):
+            from ui.overwrite_dialog import OverwriteConfirmDialog
+            ow_dlg = OverwriteConfirmDialog(target_dir, fname_final, parent=self)
+            ow_dlg.exec()
+            chosen_action = ow_dlg.get_action()
+            if chosen_action == OverwriteConfirmDialog.ACTION_CANCEL:
+                return
+            elif chosen_action == OverwriteConfirmDialog.ACTION_AUTO_RENAME:
+                new_name = ow_dlg.get_resolved_filename()
+                self.edit_filename.setText(new_name)
+                fname_final = new_name
 
         # Check disk free space
         free_space = get_disk_free_space(target_dir)

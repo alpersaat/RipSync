@@ -11,7 +11,12 @@ import httpx
 import xml.etree.ElementTree as ET
 
 from core.speed_limiter import SpeedLimiter
-from core.social_resolver import SocialResolver, is_tiktok_url, is_instagram_url, is_twitter_url
+from core.social_resolver import SocialResolver, is_tiktok_url, is_instagram_url, is_twitter_url, format_social_error
+from core.logger import get_logger
+from core.paths import to_long_path
+from core.notifier import notify_error
+
+logger = get_logger("stream_downloader")
 
 STREAM_DOMAINS = (
     "youtube.com", "youtu.be",
@@ -169,7 +174,7 @@ class StreamDownloader:
 
     def _run_download(self):
         try:
-            os.makedirs(self.save_dir, exist_ok=True)
+            os.makedirs(to_long_path(self.save_dir), exist_ok=True)
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
             # Handle Subtitle (.srt) downloading
@@ -187,7 +192,6 @@ class StreamDownloader:
                 "format": format_spec,
                 "quiet": True,
                 "no_warnings": True,
-                "nocheckcertificate": True,
                 "ignoreerrors": False,
                 "http_headers": {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
@@ -244,13 +248,20 @@ class StreamDownloader:
             download_url = self.url
             if is_tiktok_url(self.url):
                 self._set_status("Probing", "TikTok filigransız video bağlantısı çözülüyor...")
-                social_info = SocialResolver.resolve_tiktok(self.url)
+                def on_warn_tt(msg):
+                    self._set_status("Probing", msg)
+                social_info = SocialResolver.resolve_tiktok(self.url, warning_callback=on_warn_tt)
             elif is_instagram_url(self.url):
                 self._set_status("Probing", "Instagram Reels bağlantısı çözülüyor...")
-                social_info = SocialResolver.resolve_instagram(self.url, cookies=self.headers.get("Cookie"))
+                def on_warn_ig(msg):
+                    self._set_status("Probing", msg)
+                social_info = SocialResolver.resolve_instagram(self.url, cookies=self.headers.get("Cookie"), warning_callback=on_warn_ig)
             elif is_twitter_url(self.url):
                 self._set_status("Probing", "X (Twitter) video bağlantısı çözülüyor...")
                 social_info = SocialResolver.resolve_twitter(self.url)
+
+            if social_info and social_info.get("warning"):
+                self._set_status("Probing", social_info["warning"])
 
             if social_info and social_info.get("video_url"):
                 if is_audio_only and social_info.get("audio_url"):
@@ -337,9 +348,14 @@ class StreamDownloader:
                 if "İndirme kullanıcı tarafından" in err_msg:
                     self._set_status("Paused")
                 else:
-                    self._set_status("Error", f"Medya İndirme Hatası: {err_msg}")
+                    plat = "TikTok" if is_tiktok_url(self.url) else ("Instagram" if is_instagram_url(self.url) else ("X/Twitter" if is_twitter_url(self.url) else "YouTube/Medya"))
+                    friendly_err = format_social_error(e, platform=plat)
+                    logger.error(f"Medya indirme hatası ({self.url}): {e}", exc_info=True)
+                    self._set_status("Error", friendly_err)
+                    notify_error("Medya İndirme Hatası", f"{plat}: {friendly_err}")
             else:
-                self._set_status("Paused")
+                if self.status != "Cancelled":
+                    self._set_status("Paused")
 
     def _run_subtitle_download(self):
         """Extract and save subtitles as standard .srt format."""
@@ -455,10 +471,10 @@ class StreamDownloader:
 
             self.filename = f"{clean_title}.srt"
             self.save_path = os.path.join(self.save_dir, self.filename)
-            with open(self.save_path, "w", encoding="utf-8") as f:
+            with open(to_long_path(self.save_path), "w", encoding="utf-8") as f:
                 f.write(srt_content)
 
-            self.total_size = os.path.getsize(self.save_path)
+            self.total_size = os.path.getsize(to_long_path(self.save_path))
             self.downloaded_size = self.total_size
             if self.on_progress:
                 self.on_progress(self.total_size, self.total_size, 0.0, 0)
@@ -472,14 +488,22 @@ class StreamDownloader:
         if self.status in ("Paused", "Error"):
             self.start()
 
-    def cancel(self):
+    def cancel(self, delete_file: bool = False):
         self._stop_event.set()
         self._set_status("Cancelled")
-        if self.save_path and os.path.exists(self.save_path):
-            try:
-                os.remove(self.save_path)
-            except Exception:
-                pass
+        if delete_file:
+            candidates = []
+            if self.save_path:
+                candidates.extend([self.save_path, f"{self.save_path}.part", f"{self.save_path}.ytdl"])
+            if self.save_dir and self.filename:
+                base_path = os.path.join(self.save_dir, self.filename)
+                candidates.extend([base_path, f"{base_path}.part", f"{base_path}.ytdl"])
+            for target in set(candidates):
+                if target and os.path.exists(to_long_path(target)):
+                    try:
+                        os.remove(to_long_path(target))
+                    except Exception as e:
+                        logger.debug(f"İptal edilen medya dosyası silinemedi ({target}): {e}")
 
     def set_speed_limit(self, bps: int):
         self.speed_limiter.set_limit(bps)

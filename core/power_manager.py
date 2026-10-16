@@ -85,10 +85,63 @@ def is_keep_awake_active() -> bool:
     global _keep_awake_active
     return _keep_awake_active
 
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint),
+        ("dwTime", ctypes.c_ulong),
+    ]
+
+def get_idle_duration_seconds() -> float:
+    """
+    Returns the time in seconds since the last user keyboard or mouse input on Windows.
+    Returns 0.0 on non-Windows platforms or if the API call fails.
+    """
+    try:
+        if not hasattr(ctypes, "windll") or not hasattr(ctypes.windll, "user32") or not hasattr(ctypes.windll, "kernel32"):
+            return 0.0
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+
+        if not user32.GetLastInputInfo(ctypes.byref(lii)):
+            return 0.0
+
+        # GetTickCount returns milliseconds since system startup
+        tick_count = kernel32.GetTickCount()
+        elapsed_ms = tick_count - lii.dwTime
+        if elapsed_ms < 0:
+            elapsed_ms = 0
+        return float(elapsed_ms) / 1000.0
+    except Exception as e:
+        print(f"[PowerManager] get_idle_duration_seconds error: {e}")
+        return 0.0
+
+def is_user_active(threshold_seconds: int = 60) -> bool:
+    """
+    Returns True if user has interacted with keyboard or mouse within the given threshold in seconds.
+    If idle duration is less than threshold_seconds, user is actively using the system.
+    """
+    idle_time = get_idle_duration_seconds()
+    return idle_time < float(threshold_seconds)
+
+_global_power_manager: Optional['PowerCountdownManager'] = None
+
+def get_global_power_manager() -> Optional['PowerCountdownManager']:
+    global _global_power_manager
+    return _global_power_manager
+
+def set_global_power_manager(mgr: 'PowerCountdownManager'):
+    global _global_power_manager
+    _global_power_manager = mgr
+
 class PowerCountdownManager:
     """
     Manages a countdown before performing a power action (shutdown or sleep),
-    allowing UI to display a prompt or dialog where user can cancel it.
+    allowing UI to display a prompt or dialog where user can cancel or suspend it.
+    Supports user activity detection, suspension, and resumption.
     """
     def __init__(self, countdown_seconds: int = 30):
         self.countdown_seconds = countdown_seconds
@@ -96,11 +149,16 @@ class PowerCountdownManager:
         self.action = "none"  # "none", "shutdown", "sleep"
         self._timer: Optional[threading.Timer] = None
         self._is_active = False
+        self.is_suspended = False
+        self.suspend_reason = ""
 
         # Callbacks
         self.on_tick: Optional[Callable[[int, str], None]] = None
         self.on_executed: Optional[Callable[[str], None]] = None
         self.on_cancelled: Optional[Callable[[], None]] = None
+        self.on_suspended: Optional[Callable[[str], None]] = None
+        self.on_resumed: Optional[Callable[[], None]] = None
+        self.on_confirm_requested: Optional[Callable[[str], None]] = None
 
     def start_countdown(self, action: str, seconds: Optional[int] = None):
         if action not in ("shutdown", "sleep"):
@@ -109,16 +167,26 @@ class PowerCountdownManager:
         self.action = action
         self.remaining_seconds = seconds if seconds is not None else self.countdown_seconds
         self._is_active = True
+        self.is_suspended = False
+        self.suspend_reason = ""
         self._schedule_tick()
 
     def _schedule_tick(self):
-        if not self._is_active:
+        if not self._is_active or self.is_suspended:
             return
         if self.on_tick:
             self.on_tick(self.remaining_seconds, self.action)
 
         if self.remaining_seconds <= 0:
-            self._execute_action()
+            # Countdown reached zero: never execute the power action
+            # automatically. Ask the UI to show an explicit confirmation
+            # first; the action only runs after the user confirms.
+            self._is_active = False
+            self.is_suspended = False
+            act = self.action
+            self.action = "none"
+            if self.on_confirm_requested:
+                self.on_confirm_requested(act)
             return
 
         self._timer = threading.Timer(1.0, self._step)
@@ -126,25 +194,54 @@ class PowerCountdownManager:
         self._timer.start()
 
     def _step(self):
-        if not self._is_active:
+        if not self._is_active or self.is_suspended:
             return
         self.remaining_seconds -= 1
         self._schedule_tick()
 
-    def _execute_action(self):
-        self._is_active = False
-        act = self.action
-        self.action = "none"
-        if act == "shutdown":
-            execute_shutdown(timeout_seconds=0)
-        elif act == "sleep":
-            execute_sleep()
+    def suspend(self, reason: str = "Kullanıcı aktif kullanımda"):
+        """
+        Pauses the power countdown without completely cancelling it.
+        Useful when user activity is detected or user clicks 'Suspend'.
+        """
+        if not self._is_active or self.is_suspended:
+            return
+        self.is_suspended = True
+        self.suspend_reason = reason
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+        if self.action == "shutdown":
+            abort_shutdown()
+        if self.on_suspended:
+            self.on_suspended(reason)
 
-        if self.on_executed:
-            self.on_executed(act)
+    def resume(self):
+        """
+        Resumes countdown from current remaining seconds.
+        """
+        if not self._is_active or not self.is_suspended:
+            return
+        self.is_suspended = False
+        self.suspend_reason = ""
+        if self.on_resumed:
+            self.on_resumed()
+        self._schedule_tick()
+
+    def postpone(self, extra_seconds: int = 300):
+        """
+        Adds extra seconds to countdown or resets countdown and resumes.
+        """
+        self.remaining_seconds = max(self.remaining_seconds + extra_seconds, extra_seconds)
+        if self.is_suspended:
+            self.resume()
+        elif self._is_active and not self._timer:
+            self._schedule_tick()
 
     def cancel(self):
         self._is_active = False
+        self.is_suspended = False
+        self.suspend_reason = ""
         if self._timer:
             self._timer.cancel()
             self._timer = None
@@ -156,3 +253,14 @@ class PowerCountdownManager:
 
     def is_active(self) -> bool:
         return self._is_active
+
+    def get_status_dict(self) -> dict:
+        """Returns power management status for API and extensions."""
+        return {
+            "is_active": self._is_active,
+            "action": self.action,
+            "remaining_seconds": self.remaining_seconds,
+            "is_suspended": self.is_suspended,
+            "suspend_reason": self.suspend_reason,
+            "idle_duration_seconds": round(get_idle_duration_seconds(), 1)
+        }

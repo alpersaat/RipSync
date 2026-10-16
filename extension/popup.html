@@ -5,7 +5,7 @@
   <title>RipSync</title>
   <style>
     body {
-      width: 260px;
+      width: 290px;
       margin: 0;
       padding: 14px;
       background: #1a1b26;
@@ -16,7 +16,7 @@
     .header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
       margin-bottom: 12px;
       border-bottom: 1px solid #292e42;
       padding-bottom: 8px;
@@ -46,6 +46,11 @@
       color: #f7768e;
       border: 1px solid rgba(247, 118, 142, 0.4);
     }
+    .status-warning {
+      background: rgba(224, 175, 104, 0.15);
+      color: #e0af68;
+      border: 1px solid rgba(224, 175, 104, 0.4);
+    }
     .dot {
       width: 8px;
       height: 8px;
@@ -53,11 +58,12 @@
     }
     .status-online .dot { background: #9ece6a; }
     .status-offline .dot { background: #f7768e; }
+    .status-warning .dot { background: #e0af68; }
     .setting-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .setting-item label {
       cursor: pointer;
@@ -67,13 +73,93 @@
       cursor: pointer;
       accent-color: #3d59a1;
     }
+    .warning-box {
+      font-size: 10px;
+      line-height: 1.35;
+      color: #e0af68;
+      background: rgba(224, 175, 104, 0.1);
+      border: 1px dashed rgba(224, 175, 104, 0.3);
+      padding: 5px 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      display: none;
+    }
+    details {
+      margin-top: 10px;
+      border-top: 1px solid #292e42;
+      padding-top: 8px;
+    }
+    summary {
+      font-size: 11px;
+      color: #7aa2f7;
+      cursor: pointer;
+      font-weight: 500;
+      user-select: none;
+    }
+    .auth-box {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .input-row {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .input-row label {
+      font-size: 11px;
+      color: #a9b1d6;
+    }
+    .input-row input {
+      background: #24283b;
+      border: 1px solid #414868;
+      border-radius: 4px;
+      color: #c0caf5;
+      padding: 5px 8px;
+      font-size: 12px;
+      outline: none;
+    }
+    .input-row input:focus {
+      border-color: #7aa2f7;
+    }
+    .btn-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .btn {
+      background: #24283b;
+      border: 1px solid #414868;
+      color: #c0caf5;
+      border-radius: 4px;
+      padding: 5px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: 500;
+      flex: 1;
+      text-align: center;
+    }
+    .btn:hover {
+      background: #3b4261;
+      border-color: #7aa2f7;
+    }
+    .btn-primary {
+      background: #3d59a1;
+      border-color: #7aa2f7;
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background: #7aa2f7;
+    }
     .footer {
-      margin-top: 14px;
+      margin-top: 12px;
       padding-top: 8px;
       border-top: 1px solid #292e42;
       font-size: 11px;
       color: #565f89;
-      text-align: center;
+      display: flex;
+      justify-content: space-between;
     }
   </style>
 </head>
@@ -102,6 +188,15 @@
     <input type="checkbox" id="chk-filter-ads">
   </div>
 
+  <div class="setting-item" style="margin-top: 4px;">
+    <label for="chk-cookies" style="color: #bb9af7;">Oturum Çerezlerini İlet</label>
+    <input type="checkbox" id="chk-cookies">
+  </div>
+
+  <div id="cookie-warn" class="warning-box">
+    ⚠️ <b>Güvenlik Uyarısı:</b> Oturum çerezleri hesap bilgilerinizi içerebilir. Yalnızca oturum gerektiren özel indirmelerde açık tutunuz.
+  </div>
+
   <div id="site-section" style="display: none; border-top: 1px dashed #292e42; padding-top: 8px; margin-top: 6px;">
     <div class="setting-item" style="margin-bottom: 2px;">
       <label id="lbl-site" for="chk-site" style="font-weight: 500; color: #7aa2f7;">Bu Sitede Etkin</label>
@@ -110,8 +205,27 @@
     <div id="site-desc" style="font-size: 10px; color: #565f89; margin-bottom: 6px;"></div>
   </div>
 
+  <details id="auth-details">
+    <summary>🔒 Bağlantı & Güvenlik Anahtarı</summary>
+    <div class="auth-box">
+      <div class="input-row">
+        <label for="inp-port">Port:</label>
+        <input type="number" id="inp-port" min="1024" max="65535" value="28710">
+      </div>
+      <div class="input-row">
+        <label for="inp-token">Güvenlik Token'ı:</label>
+        <input type="password" id="inp-token" placeholder="Otomatik veya özel token">
+      </div>
+      <div class="btn-row">
+        <button id="btn-save-auth" class="btn btn-primary">Kaydet & Bağlan</button>
+        <button id="btn-sync-config" class="btn" title="Klasördeki config.json ile eşle">Otomatik Eşle</button>
+      </div>
+    </div>
+  </details>
+
   <div class="footer">
-    Port: 127.0.0.1:28710
+    <span id="footer-port">Port: 127.0.0.1:28710</span>
+    <span id="footer-auth">🔒 Korumalı</span>
   </div>
 
   <script src="popup.js"></script>

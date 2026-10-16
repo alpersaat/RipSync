@@ -9,6 +9,10 @@ if current_dir not in sys.path:
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 
+from core.logger import init_logging, get_logger
+init_logging()
+logger = get_logger("main")
+
 from core.database import Database
 from core.queue_manager import QueueManager
 from server.bridge_server import BridgeServer
@@ -39,12 +43,18 @@ def main():
 
         # 4. Bridge Server for Chrome Extension
         port = int(db.get_setting("extension_port", 28710))
+        token = db.get_or_create_bridge_token()
+
         bridge_server = BridgeServer(
             host="127.0.0.1",
             port=port,
+            auth_token=token,
             on_download_request=lambda data: window.sig_bridge_download.emit(data),
-            on_media_detected=lambda data: None
+            on_media_detected=lambda data: None,
+            auto_fallback=True,
+            on_status_change=lambda status, p, msg: window.sig_bridge_status.emit(status, p, msg or "")
         )
+        window.set_bridge_server(bridge_server)
         bridge_server.start()
 
         window.show()
@@ -52,19 +62,34 @@ def main():
         try:
             ret = app.exec()
         finally:
-            bridge_server.stop()
+            try:
+                bridge_server.stop()
+            except Exception:
+                pass
+            try:
+                queue_mgr.flush_progress()
+            except Exception:
+                pass
+            try:
+                db.close()
+            except Exception:
+                pass
 
         sys.exit(ret)
     except Exception as e:
         import traceback
+        try:
+            logger.critical("Uygulama beklenmedik bir hata nedeniyle çöktü!", exc_info=True)
+        except Exception:
+            pass
         try:
             from core.paths import get_user_data_dir
             crash_log = os.path.join(get_user_data_dir(), "crash.log")
             with open(crash_log, "a", encoding="utf-8") as f:
                 f.write("\n=== APPLICATION CRASH ===\n")
                 traceback.print_exc(file=f)
-        except Exception:
-            pass
+        except Exception as ex:
+            sys.stderr.write(f"[RipSync] Crash log yazılamadı: {ex}\n")
         raise
 
 if __name__ == "__main__":

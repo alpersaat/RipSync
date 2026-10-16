@@ -1,6 +1,8 @@
 import os
 from typing import Optional, Dict, List
 
+from core.paths import to_long_path
+
 # Standard category mapping by extensions
 CATEGORY_MAP: Dict[str, List[str]] = {
     "Video": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts"],
@@ -53,9 +55,13 @@ def get_category_folder(category: str, base_dir: Optional[str] = None) -> str:
         target_dir = base_dir
 
     try:
-        os.makedirs(target_dir, exist_ok=True)
-    except Exception:
-        pass
+        os.makedirs(to_long_path(target_dir), exist_ok=True)
+    except Exception as e:
+        try:
+            from core.logger import get_logger
+            get_logger("categories").warning(f"Kategori klasörü oluşturulamadı ({target_dir}): {e}")
+        except Exception:
+            pass
 
     return target_dir
 
@@ -68,9 +74,13 @@ def get_categorized_save_dir(filename: str, base_dir: Optional[str] = None, cate
         custom_folder = site_rules.match_rule(url)
         if custom_folder:
             try:
-                os.makedirs(custom_folder, exist_ok=True)
-            except Exception:
-                pass
+                os.makedirs(to_long_path(custom_folder), exist_ok=True)
+            except Exception as e:
+                try:
+                    from core.logger import get_logger
+                    get_logger("categories").warning(f"Özel site kuralı klasörü oluşturulamadı ({custom_folder}): {e}")
+                except Exception:
+                    pass
             return custom_folder
 
     cat = category if (category and category != "Otomatik") else detect_category(filename)

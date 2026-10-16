@@ -23,8 +23,12 @@ class SiteRulesManager:
             rules = json.loads(raw)
             if isinstance(rules, list):
                 return rules
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                from core.logger import get_logger
+                get_logger("site_rules").debug(f"Site kuralları JSON ayrıştırma hatası: {e}")
+            except Exception:
+                pass
         return []
 
     def save_rules(self, rules: List[Dict[str, Any]]):
@@ -42,8 +46,12 @@ class SiteRulesManager:
             try:
                 parsed = urlparse(clean_domain)
                 clean_domain = parsed.netloc or clean_domain
-            except Exception:
-                pass
+            except Exception as e:
+                try:
+                    from core.logger import get_logger
+                    get_logger("site_rules").debug(f"Alan adı ayrıştırma hatası ({clean_domain}): {e}")
+                except Exception:
+                    pass
         clean_domain = clean_domain.split("/")[0].split(":")[0]
 
         rules = self.get_rules()

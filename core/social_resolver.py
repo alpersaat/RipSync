@@ -3,7 +3,7 @@ import json
 import logging
 import urllib.parse
 import httpx
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,87 @@ def sanitize_title(title: str) -> str:
         cleaned = cleaned[:100].strip(" .")
     return cleaned or "video"
 
+def format_social_error(err: Any, platform: str = "") -> str:
+    """
+    Transforms low-level technical errors from yt-dlp, parth-dl, or HTTP APIs into
+    clear, user-friendly Turkish guidance with actionable next steps.
+    """
+    raw_str = str(err)
+    raw_lower = raw_str.lower()
+
+    # 1. Bot verification / Sign in required / Rate limit
+    if any(k in raw_lower for k in [
+        "not a bot", "bot verification", "sign in to confirm",
+        "confirm you're not a bot", "login required", "rate-limit",
+        "http error 429", "too many requests"
+    ]):
+        return (
+            "🛡️ Platform Bot/Oturum Koruması: İlgili platform otomatik indirme isteklerini sınırladı veya "
+            "oturum doğrulama talep ediyor. Sayfa yapısı değişmiş veya geçici engel konmuş olabilir. "
+            "Çözüm: Tarayıcınızda videonun doğrudan akış (.mp4) bağlantısını kopyalayıp 'Manuel Link Gir' seçeneğiyle indirebilirsiniz."
+        )
+
+    # 2. Private, age-restricted or removed video
+    if any(k in raw_lower for k in [
+        "private video", "sign in if you've been granted", "video unavailable",
+        "has been removed", "this video is private", "not found", "content is not available"
+    ]):
+        return (
+            "🔒 Video Gizli veya Kaldırılmış: Bu video içerik üreticisi tarafından silinmiş, gizliye alınmış veya "
+            "özel hesapla sınırlandırılmış. Erişebiliyorsanız tarayıcıdan doğrudan video akış bağlantısını manuel olarak giriniz."
+        )
+
+    # 3. HTTP 403 Forbidden / Expired temporary token
+    if any(k in raw_lower for k in ["http error 403", "403: forbidden", "forbidden", "http error 401"]):
+        return (
+            "⏱️ Erişim Engeli veya Bağlantı Süresi Doldu (HTTP 403): Medya sunucusu geçici indirme anahtarını geçersiz kıldı. "
+            "Çözüm: Tarayıcınızdan videoyu yenileyip yeni video akış adresini kopyalayarak 'Manuel Link Gir' seçeneğini kullanın."
+        )
+
+    # 4. Extractor or DOM structure changed
+    if any(k in raw_lower for k in [
+        "unable to extract", "signature extraction", "regex", "extractorerror",
+        "jsplayer", "n challenge", "player response", "unsupported url"
+    ]):
+        plat_txt = f" ({platform})" if platform else ""
+        return (
+            f"⚠️ Sayfa Yapısı Değişti{plat_txt}: Sosyal medya platformu arayüzünü güncellediği için otomatik çözümleme yapılamadı. "
+            "Çözüm: Tarayıcınızdan video akış adresini kopyalayarak 'Manuel Link Gir' seçeneği ile doğrudan indirebilirsiniz."
+        )
+
+    # 5. Format / Quality not found
+    if "requested format is not available" in raw_lower:
+        return (
+            "🎞️ İstenen Format Bulunamadı: Seçtiğiniz çözünürlük veya ses formatı bu medyada bulunmuyor. "
+            "Çözüm: Kalite ayarını 'En Yüksek Kalite' veya farklı bir seçeneğe getirip tekrar deneyin."
+        )
+
+    # 6. Network timeout / disconnect
+    if any(k in raw_lower for k in [
+        "timed out", "timeout", "connection reset", "remotedisconnected",
+        "network is unreachable", "connection error"
+    ]):
+        return (
+            "🌐 Ağ Bağlantısı Zaman Aşımı: Medya sunucusuna bağlanırken kesinti oluştu. "
+            "İnternet bağlantınızı kontrol edip tekrar deneyin veya alternatif link girin."
+        )
+
+    # 7. Third-party API failure fallback
+    if "tikwm" in raw_lower:
+        return (
+            "⚠️ TikWM API Hizmet Dışı: Üçüncü parti TikTok çözümleyicisine ulaşılamadı ve alternatif akış bulunamadı. "
+            "Lütfen videoyu tarayıcıdan açarak video akış bağlantısını 'Manuel Link Gir' ile yapıştırın."
+        )
+
+    # Clean generic fallback
+    clean_err = raw_str.replace("ERROR: ", "").strip()
+    if len(clean_err) > 120:
+        clean_err = clean_err[:117] + "..."
+    return (
+        f"⚠️ Medya İndirme Hatası ({clean_err}). "
+        "Platform sayfa yapısını değiştirmiş olabilir. 'Manuel Link Gir' seçeneğiyle doğrudan video bağlantısını yapıştırıp indirmeyi sürdürebilirsiniz."
+    )
+
 class SocialResolver:
     """
     Dedicated resolver for extracting watermark-free video and audio streams
@@ -53,12 +134,14 @@ class SocialResolver:
     """
 
     @classmethod
-    def resolve_tiktok(cls, url: str) -> Optional[Dict[str, Any]]:
+    def resolve_tiktok(cls, url: str, warning_callback: Optional[Callable[[str], None]] = None) -> Optional[Dict[str, Any]]:
         """
         Extract 100% watermark-free (filigransız) video from TikTok.
-        Tries TikWM API first (fastest, unwatermarked HD), then yt-dlp format filter,
-        then direct Aweme API.
+        Tries TikWM API first (fastest, unwatermarked HD). If TikWM is unreachable, down,
+        or rate-limited, gives a clear user-facing warning and automatically falls back to yt-dlp.
         """
+        fallback_warning = None
+
         # 1. Try TikWM API (primary watermark-free provider)
         try:
             tikwm_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}"
@@ -84,10 +167,26 @@ class SocialResolver:
                             "platform": "TikTok",
                             "source": "tikwm"
                         }
+                else:
+                    err_code = data.get("msg") or data.get("code")
+                    fallback_warning = f"⚠️ TikWM API yanıt vermedi ({err_code}). yt-dlp yedek motoruna otomatik geçiliyor..."
+            else:
+                fallback_warning = f"⚠️ TikWM API erişilemedi (HTTP {resp.status_code}). yt-dlp yedek motoruna otomatik geçiliyor..."
         except Exception as e:
+            fallback_warning = f"⚠️ TikWM API servisine erişilemedi ({type(e).__name__}). yt-dlp yedek motoruna otomatik geçiliyor..."
             logger.warning(f"TikWM resolver failed for {url}: {e}")
 
-        # 2. Try yt-dlp with strict watermark-free format filtering
+        if not fallback_warning:
+            fallback_warning = "⚠️ TikWM filigransız bağlantı sağlayamadı. yt-dlp yedek motoruna otomatik geçiliyor..."
+
+        logger.info(fallback_warning)
+        if warning_callback:
+            try:
+                warning_callback(fallback_warning)
+            except Exception:
+                pass
+
+        # 2. Try yt-dlp with strict watermark-free format filtering (Automatic Fallback)
         try:
             import yt_dlp
             ydl_opts = {
@@ -120,7 +219,9 @@ class SocialResolver:
                             "duration": info.get("duration", 0),
                             "is_watermark_free": True,
                             "platform": "TikTok",
-                            "source": "yt-dlp"
+                            "source": "yt-dlp",
+                            "warning": fallback_warning,
+                            "fallback": True
                         }
         except Exception as e:
             logger.warning(f"yt-dlp TikTok fallback failed: {e}")
@@ -128,12 +229,15 @@ class SocialResolver:
         return None
 
     @classmethod
-    def resolve_instagram(cls, url: str, cookies: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def resolve_instagram(cls, url: str, cookies: Optional[str] = None, warning_callback: Optional[Callable[[str], None]] = None) -> Optional[Dict[str, Any]]:
         """
         Extract original watermark-free video from Instagram Reels & Posts.
-        Tries parth-dl (GraphQL/Polaris/Embed anonymous extractor) first,
-        then yt-dlp with cookies/impersonation.
+        Tries parth-dl (GraphQL/Polaris/Embed anonymous extractor) first.
+        If parth-dl fails, is not installed, or page structure changed,
+        gives a clear warning and automatically falls back to yt-dlp with cookies.
         """
+        fallback_warning = None
+
         # 1. Try parth-dl (extremely robust anonymous extractor for Reels and Posts)
         try:
             import parth_dl
@@ -164,8 +268,19 @@ class SocialResolver:
                             "platform": "Instagram",
                             "source": "parth-dl"
                         }
+            fallback_warning = "⚠️ Instagram parth-dl çözümleyicisi akış bulamadı. yt-dlp yedek motoruna geçiliyor..."
+        except ImportError:
+            fallback_warning = "⚠️ parth-dl kütüphanesi bulunamadı (pip install parth-dl). yt-dlp yedek motoruna geçiliyor..."
+            logger.warning(fallback_warning)
         except Exception as e:
+            fallback_warning = f"⚠️ Instagram parth-dl çözümleyicisi hata verdi ({type(e).__name__}). yt-dlp yedek motoruna geçiliyor..."
             logger.warning(f"parth-dl extraction failed for {url}: {e}")
+
+        if warning_callback and fallback_warning:
+            try:
+                warning_callback(fallback_warning)
+            except Exception:
+                pass
 
         # 2. Try yt-dlp with cookies if provided
         try:
@@ -193,7 +308,9 @@ class SocialResolver:
                         "duration": info.get("duration", 0),
                         "is_watermark_free": True,
                         "platform": "Instagram",
-                        "source": "yt-dlp"
+                        "source": "yt-dlp",
+                        "warning": fallback_warning,
+                        "fallback": True
                     }
         except Exception as e:
             logger.warning(f"yt-dlp Instagram extraction failed: {e}")

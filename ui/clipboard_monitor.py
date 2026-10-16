@@ -1,8 +1,11 @@
+import hashlib
 import re
 import urllib.parse
 from typing import Dict, Any, Optional
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QApplication
+
+from core.privacy import is_sensitive_text
 
 DOWNLOADABLE_EXTENSIONS = (
     ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso", ".dmg",
@@ -45,17 +48,18 @@ class ClipboardMonitor(QObject):
     """
     Monitors system clipboard for downloadable media or file URLs.
     Emits detected link with metadata (service name, icon, is_video, etc.).
-    Supports smart exclusion domains and only-media filtering.
+    Supports privacy protection, smart exclusion domains, and only-media filtering.
     """
     # Emits (url, info_dict)
     link_detected = pyqtSignal(str, dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.enabled = True
+        self.enabled = False  # Privacy by default: disabled until explicitly turned on or consented
         self.only_media = False
         self.ignore_domains = list(IGNORED_DOMAINS)
         self.last_text = ""
+        self.last_hash = ""  # SHA-256 hash representation to avoid storing sensitive strings in RAM
         self.clipboard = QApplication.clipboard()
         if self.clipboard:
             self.clipboard.dataChanged.connect(self._on_clipboard_change)
@@ -63,7 +67,7 @@ class ClipboardMonitor(QObject):
     def set_enabled(self, val: bool):
         self.enabled = val
 
-    def configure(self, enabled: bool = True, only_media: bool = False, ignore_domains: Optional[list] = None):
+    def configure(self, enabled: bool = False, only_media: bool = False, ignore_domains: Optional[list] = None):
         """Configure clipboard monitoring rules."""
         self.enabled = enabled
         self.only_media = only_media
@@ -79,11 +83,30 @@ class ClipboardMonitor(QObject):
         except Exception:
             return
 
-        if not text or text == self.last_text:
+        if not text:
             return
 
-        # Check if URL
+        # Privacy hash check: avoid processing same clipboard content repeatedly
+        try:
+            cur_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
+        except Exception:
+            cur_hash = ""
+
+        if cur_hash and cur_hash == self.last_hash:
+            return
+
+        self.last_hash = cur_hash
+
+        # Strictly check if text looks like a URL
         if not (text.startswith("http://") or text.startswith("https://")):
+            # Clear last_text so non-URL strings (e.g. copied passwords, notes) are NEVER kept in memory
+            self.last_text = ""
+            return
+
+        # Sensitive content detection (passwords, auth tokens, credit cards, credentials)
+        if is_sensitive_text(text):
+            # Immediately discard sensitive data without storing in memory or emitting
+            self.last_text = ""
             return
 
         self.last_text = text
@@ -99,6 +122,10 @@ class ClipboardMonitor(QObject):
         Returns metadata dict if valid, None otherwise.
         """
         if not (url.startswith("http://") or url.startswith("https://")):
+            return None
+
+        # Privacy check: Ignore if URL contains sensitive patterns (passwords, tokens, keys)
+        if is_sensitive_text(url):
             return None
 
         # Check ignore list

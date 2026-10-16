@@ -6,6 +6,8 @@ import threading
 import subprocess
 from typing import Optional, Tuple, Callable
 
+from core.paths import to_long_path
+
 ARCHIVE_EXTENSIONS = (
     ".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".7z", ".rar"
 )
@@ -50,7 +52,7 @@ def extract_archive(
     else:
         target_dir = base_dir
 
-    os.makedirs(target_dir, exist_ok=True)
+    os.makedirs(to_long_path(target_dir), exist_ok=True)
     lower_path = archive_path.lower()
 
     try:

@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QCloseEvent
 
@@ -78,22 +79,68 @@ class TestTrayAndNotifications(unittest.TestCase):
     def test_queue_empty_triggers_countdown(self):
         """Test: Kuyruk bittiğinde otomatik geri sayım diyaloğunun tetiklenmesi ve iptal mekanizması."""
         self.win.current_queue_action = "shutdown"
+        # Mock user as idle (away from desk)
+        with patch("ui.main_window.is_user_active", return_value=False):
+            # Trigger queue empty
+            self.win._handle_queue_empty()
 
-        # Trigger queue empty
-        self.win._handle_queue_empty()
+            self.assertIsNotNone(self.win.power_dialog)
+            self.assertTrue(self.win.power_mgr.is_active())
+            self.assertFalse(self.win.power_mgr.is_suspended)
+            self.assertEqual(self.win.power_mgr.action, "shutdown")
 
-        self.assertIsNotNone(self.win.power_dialog)
-        self.assertTrue(self.win.power_mgr.is_active())
-        self.assertEqual(self.win.power_mgr.action, "shutdown")
+            # Test countdown tick
+            self.win._handle_countdown_tick(28, "shutdown")
+            self.assertEqual(self.win.power_dialog.remaining_seconds, 28)
 
-        # Test countdown tick
-        self.win._handle_countdown_tick(28, "shutdown")
-        self.assertEqual(self.win.power_dialog.remaining_seconds, 28)
+            # Test cancel
+            self.win._cancel_power_countdown()
+            self.assertFalse(self.win.power_mgr.is_active())
+            self.assertIsNone(self.win.power_dialog)
 
-        # Test cancel
-        self.win._cancel_power_countdown()
-        self.assertFalse(self.win.power_mgr.is_active())
-        self.assertIsNone(self.win.power_dialog)
+    def test_queue_empty_active_user_auto_suspend(self):
+        """Test: Kullanıcı bilgisayarı aktif kullanırken kuyruk biterse kapatma otomatik askıya alınır."""
+        self.win.current_queue_action = "shutdown"
+        # Mock user as active (e.g. typing or using mouse within threshold)
+        with patch("ui.main_window.is_user_active") as mock_active, \
+             patch("ui.main_window.get_idle_duration_seconds", return_value=12.0):
+            mock_active.return_value = True
+            self.win._handle_queue_empty()
+
+            self.assertIsNotNone(self.win.power_dialog)
+            self.assertTrue(self.win.power_mgr.is_active())
+            self.assertTrue(self.win.power_mgr.is_suspended)
+            self.assertTrue(self.win.power_dialog.is_suspended)
+
+            # User is now away (idle) and clicks resume
+            mock_active.return_value = False
+            self.win._resume_power_countdown()
+            self.assertFalse(self.win.power_mgr.is_suspended)
+            self.assertFalse(self.win.power_dialog.is_suspended)
+
+            # Clean up
+            self.win._cancel_power_countdown()
+
+    def test_dialog_suspend_resume_buttons(self):
+        """Test: Diyalog üzerindeki askıya al ve devam ettir butonlarının işlevi."""
+        self.win.current_queue_action = "sleep"
+        with patch("ui.main_window.is_user_active", return_value=False):
+            self.win._handle_queue_empty()
+            self.assertFalse(self.win.power_mgr.is_suspended)
+
+            # Click suspend button
+            self.win.power_dialog.btn_suspend.click()
+            self.assertTrue(self.win.power_mgr.is_suspended)
+            self.assertTrue(self.win.power_dialog.is_suspended)
+            self.assertIn("Devam Ettir", self.win.power_dialog.btn_suspend.text())
+
+            # Click resume button
+            self.win.power_dialog.btn_suspend.click()
+            self.assertFalse(self.win.power_mgr.is_suspended)
+            self.assertFalse(self.win.power_dialog.is_suspended)
+
+            self.win._cancel_power_countdown()
+
 
 if __name__ == "__main__":
     unittest.main()

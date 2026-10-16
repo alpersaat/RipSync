@@ -1,7 +1,7 @@
 import os
 import tempfile
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 
 from core.database import Database
 from core.paths import sanitize_filename, resolve_file_conflict
@@ -208,21 +208,25 @@ def test_automation_settings_database(temp_db):
     default = temp_db.get_automation_settings()
     assert default["command_enabled"] is False
     assert default["webhook_enabled"] is False
+    assert default["webhook_include_filepath"] is False
 
     temp_db.save_automation_settings({
         "command_enabled": True,
         "command": "python script.py {filepath}",
         "webhook_enabled": True,
-        "webhook_url": "https://discord.com/api/webhooks/123/abc"
+        "webhook_url": "https://discord.com/api/webhooks/123/abc",
+        "webhook_include_filepath": True
     })
     saved = temp_db.get_automation_settings()
     assert saved["command_enabled"] is True
     assert saved["command"] == "python script.py {filepath}"
     assert saved["webhook_enabled"] is True
     assert saved["webhook_url"] == "https://discord.com/api/webhooks/123/abc"
+    assert saved["webhook_include_filepath"] is True
 
 @patch("httpx.Client")
-def test_send_webhook_notification(mock_client_cls):
+def test_send_webhook_notification_privacy_default(mock_client_cls):
+    """By default, filepath must NOT be included in the webhook payload (prevent leaks)."""
     mock_client = MagicMock()
     mock_resp = MagicMock()
     mock_resp.status_code = 204
@@ -231,22 +235,82 @@ def test_send_webhook_notification(mock_client_cls):
 
     ctx = {
         "{filename}": "package.zip",
-        "{filepath}": "/tmp/package.zip",
+        "{filepath}": "C:\\Users\\SecretUser\\Downloads\\package.zip",
         "{filesize}": "50 MB",
         "{category}": "Sıkıştırılmış",
         "{url}": "https://example.com/package.zip"
     }
 
+    # Default include_filepath=False
     success, msg = send_webhook_notification("https://discord.com/api/webhooks/test", ctx)
     assert success is True
     assert "204" in msg
     mock_client.post.assert_called_once()
     payload = mock_client.post.call_args[1]["json"]
     assert "package.zip" in payload["content"]
-    assert len(payload["embeds"]) > 0
+    assert "filepath" not in payload
+    embed_fields = payload["embeds"][0]["fields"]
+    field_names = [f["name"] for f in embed_fields]
+    assert "📍 Kayıt Konumu" not in field_names
+    assert "📁 Dosya Adı" in field_names
+    assert "💾 Boyut" in field_names
+    assert "🔗 Bağlantı" in field_names
 
-@patch("subprocess.Popen")
-def test_execute_post_download(mock_popen):
+@patch("httpx.Client")
+def test_send_webhook_notification_with_filepath(mock_client_cls):
+    """When explicitly requested (include_filepath=True), filepath is included."""
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_client.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_client
+
+    ctx = {
+        "{filename}": "package.zip",
+        "{filepath}": "C:\\Users\\SecretUser\\Downloads\\package.zip",
+        "{filesize}": "50 MB",
+        "{category}": "Sıkıştırılmış",
+        "{url}": "https://example.com/package.zip"
+    }
+
+    success, msg = send_webhook_notification("https://discord.com/api/webhooks/test", ctx, include_filepath=True)
+    assert success is True
+    payload = mock_client.post.call_args[1]["json"]
+    assert payload.get("filepath") == "C:\\Users\\SecretUser\\Downloads\\package.zip"
+    embed_fields = payload["embeds"][0]["fields"]
+    field_names = [f["name"] for f in embed_fields]
+    assert "📍 Kayıt Konumu" in field_names
+
+@patch("core.post_download.send_webhook_notification_async")
+def test_execute_post_download_webhook_include_filepath(mock_send_async):
+    rec = {
+        "filename": "demo.mp3",
+        "save_path": "C:\\Downloads\\demo.mp3",
+        "url": "https://example.com/demo.mp3",
+        "category": "Müzik",
+        "total_size": 5000000,
+        "status": "Completed"
+    }
+    settings_no_leak = {
+        "command_enabled": False,
+        "webhook_enabled": True,
+        "webhook_url": "https://discord.com/api/webhooks/test",
+        "webhook_include_filepath": False
+    }
+    execute_post_download(rec, settings_no_leak)
+    mock_send_async.assert_called_with("https://discord.com/api/webhooks/test", ANY, include_filepath=False)
+
+    settings_with_fp = {
+        "command_enabled": False,
+        "webhook_enabled": True,
+        "webhook_url": "https://discord.com/api/webhooks/test",
+        "webhook_include_filepath": True
+    }
+    execute_post_download(rec, settings_with_fp)
+    mock_send_async.assert_called_with("https://discord.com/api/webhooks/test", ANY, include_filepath=True)
+
+@patch("subprocess.run")
+def test_execute_post_download(mock_run):
     rec = {
         "filename": "demo.mp3",
         "save_path": "/tmp/demo.mp3",
@@ -265,6 +329,9 @@ def test_execute_post_download(mock_popen):
     # Background thread is spawned; give small tick
     import time
     time.sleep(0.15)
-    mock_popen.assert_called_once()
-    call_cmd = mock_popen.call_args[0][0]
-    assert "demo.mp3" in call_cmd
+    mock_run.assert_called_once()
+    call_args, call_kwargs = mock_run.call_args
+    assert call_kwargs.get("shell") is False
+    cmd_args = call_args[0]
+    assert any("demo.mp3" in arg for arg in cmd_args)
+

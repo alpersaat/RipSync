@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QToolBar, QPushButton,
     QLabel, QProgressBar, QMenu, QMessageBox, QStatusBar,
     QApplication, QSystemTrayIcon, QSlider, QCheckBox, QComboBox, QSpinBox,
-    QLineEdit, QFileDialog, QInputDialog
+    QLineEdit, QFileDialog, QInputDialog, QToolButton, QSizePolicy, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut, QDrag, QDragEnterEvent, QDropEvent
@@ -30,14 +30,25 @@ from ui.tray_icon import create_default_icon, TrayIcon
 from ui.clipboard_monitor import ClipboardMonitor
 from ui.clipboard_popup import ClipboardNotificationPopup
 from ui.duplicate_dialog import DuplicateDownloadDialog
+from ui.delete_dialog import DeleteConfirmDialog
 from core.database import Database
 from core.queue_manager import QueueManager
-from core.power_manager import PowerCountdownManager
+from core.power_manager import (
+    PowerCountdownManager, set_global_power_manager,
+    is_user_active, get_idle_duration_seconds
+)
 from core.scheduler import DownloadScheduler
 from core.playlist_parser import is_youtube_playlist_url
 from core.paths import show_in_explorer, get_disk_total_and_free, get_disk_free_space
-from core.notifier import play_completion_sound, play_error_sound
+from core.notifier import (
+    play_completion_sound, play_error_sound, play_warning_sound,
+    notify_power_countdown, notify_power_suspended, open_browser_power_alert
+)
 from core.extractor import is_archive_file, extract_archive_async
+from core.logger import get_logger
+
+logger = get_logger("ui.main_window")
+from core.stream_downloader import is_stream_url
 from core.site_rules import SiteRulesManager
 from core.metered_connection import MeteredConnectionMonitor, is_metered_connection
 
@@ -87,6 +98,7 @@ class DownloadsTableWidget(QTableWidget):
 class MainWindow(QMainWindow):
     # Cross-thread UI signal
     sig_bridge_download = pyqtSignal(dict)
+    sig_bridge_status = pyqtSignal(str, int, str)
     sig_progress_update = pyqtSignal(str, int, int, float, int)
     sig_segments_update = pyqtSignal(str, list)
     sig_status_update = pyqtSignal(str, str, str)
@@ -94,6 +106,8 @@ class MainWindow(QMainWindow):
     sig_queue_empty = pyqtSignal()
     sig_countdown_tick = pyqtSignal(int, str)
     sig_countdown_executed = pyqtSignal(str)
+    sig_countdown_suspended = pyqtSignal(str)
+    sig_countdown_resumed = pyqtSignal()
     sig_scheduler_tick = pyqtSignal(dict)
     sig_scheduler_started = pyqtSignal()
     sig_scheduler_stopped = pyqtSignal(str)
@@ -102,6 +116,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = db
         self.queue_mgr = queue_mgr
+        self.bridge_server = None
 
         self.setWindowTitle("RipSync - Internet Download Manager")
         self.setWindowIcon(create_default_icon())
@@ -121,6 +136,7 @@ class MainWindow(QMainWindow):
 
         # Power Countdown Manager
         self.power_mgr = PowerCountdownManager(countdown_seconds=30)
+        set_global_power_manager(self.power_mgr)
         self.power_dialog: Optional[PowerCountdownDialog] = None
         self.current_queue_action = self.db.get_setting("on_queue_complete_action", "none")
 
@@ -140,11 +156,15 @@ class MainWindow(QMainWindow):
         self.clip_monitor = ClipboardMonitor(self)
         clip_cfg = self.db.get_clipboard_settings()
         self.clip_monitor.configure(
-            enabled=bool(clip_cfg.get("enabled", True)),
+            enabled=bool(clip_cfg.get("enabled", False)),
             only_media=bool(clip_cfg.get("only_media", False)),
             ignore_domains=clip_cfg.get("ignore_domains")
         )
         self.clip_monitor.link_detected.connect(self._on_clipboard_link_detected)
+
+        # Check clipboard first-run privacy prompt
+        if not clip_cfg.get("prompted", False):
+            QTimer.singleShot(700, self._check_clipboard_first_run_consent)
 
         # Tray Icon
         self.tray = TrayIcon(current_queue_action=self.current_queue_action, parent=self)
@@ -162,11 +182,124 @@ class MainWindow(QMainWindow):
         # Start Scheduler background loop
         self.scheduler.start()
 
+        # Check First-Run / Onboarding Tour & Apply UI Mode
+        self.ui_mode = self.db.get_ui_mode()
+        self.apply_ui_mode(self.ui_mode)
+        QTimer.singleShot(400, self._check_first_run_onboarding)
+
+    def _init_menubar(self):
+        menubar = self.menuBar()
+
+        # 📁 Dosya Menüsü
+        menu_file = menubar.addMenu("📁 Dosya")
+        act_file_add = menu_file.addAction("➕ Yeni URL Ekle...")
+        act_file_add.setShortcut(QKeySequence("Ctrl+N"))
+        act_file_add.triggered.connect(self._show_add_dialog)
+
+        act_file_batch = menu_file.addAction("📋 Toplu Link Ekle...")
+        act_file_batch.setShortcut(QKeySequence("Ctrl+B"))
+        act_file_batch.triggered.connect(lambda: self._show_batch_add_dialog())
+
+        act_file_playlist = menu_file.addAction("📑 Oynatma Listesi İndir...")
+        act_file_playlist.triggered.connect(lambda: self._show_playlist_dialog())
+
+        menu_file.addSeparator()
+        act_clean = menu_file.addAction("🧹 Eksik Dosyaları Temizle")
+        act_clean.triggered.connect(self._clean_missing_files)
+
+        menu_file.addSeparator()
+        act_exit = menu_file.addAction("❌ Çıkış")
+        act_exit.setShortcut(QKeySequence("Alt+F4"))
+        act_exit.triggered.connect(self._quit_application)
+
+        # 👁️ Görünüm Menüsü
+        menu_view = menubar.addMenu("👁️ Görünüm")
+        self.act_view_simple = menu_view.addAction("🟢 Basit Mod (Sade Görünüm)")
+        self.act_view_simple.setCheckable(True)
+        self.act_view_simple.triggered.connect(lambda: self.apply_ui_mode("simple"))
+
+        self.act_view_advanced = menu_view.addAction("⚡ Gelişmiş Mod (Uzman Araçları)")
+        self.act_view_advanced.setCheckable(True)
+        self.act_view_advanced.triggered.connect(lambda: self.apply_ui_mode("advanced"))
+
+        menu_view.addSeparator()
+        act_focus_search = menu_view.addAction("🔍 Aramaya Odaklan")
+        act_focus_search.setShortcut(QKeySequence("Ctrl+F"))
+        act_focus_search.triggered.connect(lambda: getattr(self, "edit_search", None) and self.edit_search.setFocus())
+
+        # ⬇️ İndirme Menüsü
+        menu_dl = menubar.addMenu("⬇️ İndirme")
+        act_start = menu_dl.addAction("▶ Seçilenleri Başlat")
+        act_start.triggered.connect(self._start_selected)
+
+        act_pause = menu_dl.addAction("⏸ Seçilenleri Duraklat")
+        act_pause.triggered.connect(self._pause_selected)
+
+        act_cancel = menu_dl.addAction("⏹ Seçilenleri İptal Et")
+        act_cancel.triggered.connect(self._cancel_selected)
+
+        act_del = menu_dl.addAction("🗑 Seçilenleri Listeden Kaldır")
+        act_del.setShortcut(QKeySequence("Delete"))
+        act_del.setToolTip("Dosyayı diskte koruyarak yalnızca listeden kaldırır (Varsayılan)")
+        act_del.triggered.connect(self._delete_selected)
+
+        act_del_file = menu_dl.addAction("💥 Seçilenleri Dosyasıyla Birlikte Sil")
+        act_del_file.setShortcut(QKeySequence("Shift+Delete"))
+        act_del_file.setToolTip("İndirme kaydını ve indirilen dosyayı kalıcı olarak diskten siler")
+        act_del_file.triggered.connect(self._delete_selected_with_files)
+
+        menu_dl.addSeparator()
+        act_start_all = menu_dl.addAction("⚡ Tüm Kuyruğu Başlat")
+        act_start_all.triggered.connect(self._on_start_all)
+
+        act_pause_all = menu_dl.addAction("⏸ Tümünü Durdur")
+        act_pause_all.triggered.connect(self._on_pause_all)
+
+        # 🛠️ Araçlar Menüsü
+        menu_tools = menubar.addMenu("🛠️ Araçlar")
+        act_sched = menu_tools.addAction("⏱ Gece Zamanlayıcısı...")
+        act_sched.triggered.connect(self._show_scheduler_dialog)
+
+        act_stats = menu_tools.addAction("📊 İstatistikler & Trafik...")
+        act_stats.triggered.connect(self._show_statistics_dialog)
+
+        menu_tools.addSeparator()
+        act_ext_dir = menu_tools.addAction("📁 Eklenti Klasörünü Seç / Aç")
+        act_ext_dir.triggered.connect(self._select_and_open_extension_dir)
+
+        act_ext_copy = menu_tools.addAction("📋 Eklenti Klasör Yolunu Kopyala")
+        act_ext_copy.triggered.connect(self._copy_extension_dir_path)
+
+        act_ext = menu_tools.addAction("🌐 Tarayıcı Eklentisi Kılavuzu (Görsel)...")
+        act_ext.triggered.connect(self._show_extension_guide)
+
+        menu_tools.addSeparator()
+        act_settings = menu_tools.addAction("⚙ Ayarlar...")
+        act_settings.setShortcut(QKeySequence("Ctrl+P"))
+        act_settings.triggered.connect(self._show_settings_dialog)
+
+        # ❓ Yardım Menüsü
+        menu_help = menubar.addMenu("❓ Yardım")
+        act_wiz = menu_help.addAction("🧙 Eklenti & Kurulum Sihirbazı...")
+        act_wiz.triggered.connect(self._show_setup_wizard)
+
+        act_tour = menu_help.addAction("🚀 Hızlı Başlangıç Rehberli Turu (Onboarding)...")
+        act_tour.triggered.connect(self._show_onboarding_dialog)
+
+        act_about = menu_help.addAction("ℹ️ RipSync Hakkında...")
+        act_about.triggered.connect(self._show_about_dialog)
+
     def _init_ui(self):
+        # Menu Bar
+        self._init_menubar()
+
         # Toolbar
         toolbar = QToolBar("Ana Araç Çubuğu")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+        self.toolbar = toolbar
+
+        self.adv_toolbar_separators = []
 
         self.act_add = QAction("➕ URL Ekle", self)
         self.act_add.triggered.connect(self._show_add_dialog)
@@ -182,7 +315,7 @@ class MainWindow(QMainWindow):
         self.act_batch_add.triggered.connect(lambda: self._show_batch_add_dialog())
         toolbar.addAction(self.act_batch_add)
 
-        toolbar.addSeparator()
+        self.sep_basic_1 = toolbar.addSeparator()
 
         self.act_start = QAction("▶ Başlat", self)
         self.act_start.triggered.connect(self._start_selected)
@@ -197,10 +330,16 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.act_stop)
 
         self.act_delete = QAction("🗑 Sil", self)
+        self.act_delete.setToolTip("Listeden Kaldır (Delete)\nVarsayılan: Dosya diskte korunur, listeden silinir.")
         self.act_delete.triggered.connect(self._delete_selected)
         toolbar.addAction(self.act_delete)
 
-        toolbar.addSeparator()
+        self.act_delete_file = QAction("💥 Dosyayla Sil", self)
+        self.act_delete_file.setToolTip("Dosyayla Birlikte Sil (Shift+Delete)\nİndirme kaydını ve dosyasını kalıcı olarak siler.")
+        self.act_delete_file.triggered.connect(self._delete_selected_with_files)
+        toolbar.addAction(self.act_delete_file)
+
+        self.sep_basic_2 = toolbar.addSeparator()
 
         self.act_open_file = QAction("📂 Dosyayı Aç", self)
         self.act_open_file.triggered.connect(self._open_selected_file)
@@ -210,7 +349,8 @@ class MainWindow(QMainWindow):
         self.act_open_folder.triggered.connect(self._open_selected_folder)
         toolbar.addAction(self.act_open_folder)
 
-        toolbar.addSeparator()
+        sep_q = toolbar.addSeparator()
+        self.adv_toolbar_separators.append(sep_q)
 
         self.act_start_queue = QAction("⚡ Kuyruğu Başlat", self)
         self.act_start_queue.triggered.connect(self._on_start_all)
@@ -220,23 +360,66 @@ class MainWindow(QMainWindow):
         self.act_pause_all.triggered.connect(self._on_pause_all)
         toolbar.addAction(self.act_pause_all)
 
-        toolbar.addSeparator()
+        sep_sched = toolbar.addSeparator()
+        self.adv_toolbar_separators.append(sep_sched)
 
         self.act_scheduler = QAction("⏱ Zamanlayıcı", self)
         self.act_scheduler.setToolTip("Gece İndirmesi ve Kuyruk Planlama Penceresini Aç")
         self.act_scheduler.triggered.connect(self._show_scheduler_dialog)
         toolbar.addAction(self.act_scheduler)
 
-        toolbar.addSeparator()
+        self.sep_basic_3 = toolbar.addSeparator()
 
         self.act_settings = QAction("⚙ Ayarlar", self)
         self.act_settings.triggered.connect(self._show_settings_dialog)
         toolbar.addAction(self.act_settings)
 
+        # Eklenti Menülü Buton (Doğrudan Klasör Seçme, Kopyalama, Otomatik Kurulum ve Rehber)
+        self.btn_extension = QToolButton(self)
+        self.btn_extension.setText("🌐 Eklenti")
+        self.btn_extension.setToolTip("Tarayıcı Eklentisi: Klasörü Aç/Seç, Yolu Kopyala, Otomatik Yükle veya Rehber")
+        self.btn_extension.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+
+        ext_menu = QMenu(self.btn_extension)
+
+        act_open_ext_dir = QAction("📁 Eklenti Klasörünü Seç / Aç", self)
+        act_open_ext_dir.setToolTip("Eklenti klasörünü Dosya Gezgini'nde açar ve yolunu panoya kopyalar")
+        act_open_ext_dir.triggered.connect(self._select_and_open_extension_dir)
+        ext_menu.addAction(act_open_ext_dir)
+
+        act_copy_ext_path = QAction("📋 Eklenti Klasör Yolunu Kopyala", self)
+        act_copy_ext_path.setToolTip("Eklenti klasör yolunu panoya kopyalar (Ctrl+V ile yapıştırabilirsiniz)")
+        act_copy_ext_path.triggered.connect(self._copy_extension_dir_path)
+        ext_menu.addAction(act_copy_ext_path)
+
+        ext_menu.addSeparator()
+
+        act_launch_chrome = QAction("🚀 Chrome ile Aç (Otomatik Yükle)", self)
+        act_launch_chrome.triggered.connect(lambda: self._launch_browser_with_ext("chrome"))
+        ext_menu.addAction(act_launch_chrome)
+
+        act_launch_edge = QAction("🚀 Edge ile Aç (Otomatik Yükle)", self)
+        act_launch_edge.triggered.connect(lambda: self._launch_browser_with_ext("edge"))
+        ext_menu.addAction(act_launch_edge)
+
+        ext_menu.addSeparator()
+
+        act_open_ext_guide = QAction("🖼 Görsel Kurulum Rehberi (Adımlı)...", self)
+        act_open_ext_guide.triggered.connect(self._show_extension_guide)
+        ext_menu.addAction(act_open_ext_guide)
+
+        act_setup_wiz = QAction("🧙 Kurulum Sihirbazı...", self)
+        act_setup_wiz.triggered.connect(self._show_setup_wizard)
+        ext_menu.addAction(act_setup_wiz)
+
+        self.btn_extension.setMenu(ext_menu)
+        self.btn_extension.clicked.connect(self._show_extension_guide)
+
         self.act_extension = QAction("🌐 Eklenti", self)
         self.act_extension.setToolTip("Chrome / Edge Tarayıcı Eklentisi Kurulum Kılavuzu")
         self.act_extension.triggered.connect(self._show_extension_guide)
-        toolbar.addAction(self.act_extension)
+
+        self.act_extension_widget = toolbar.addWidget(self.btn_extension)
 
         self.act_statistics = QAction("📊 İstatistikler", self)
         self.act_statistics.setToolTip("İndirme İstatistikleri ve Ağ Trafiği Raporunu Aç")
@@ -248,11 +431,12 @@ class MainWindow(QMainWindow):
         self.act_clean_missing.triggered.connect(self._clean_missing_files)
         toolbar.addAction(self.act_clean_missing)
 
-        toolbar.addSeparator()
+        sep_conc = toolbar.addSeparator()
+        self.adv_toolbar_separators.append(sep_conc)
 
         # Concurrency Widget (Sequential Queue Limit)
-        tb_conc_widget = QWidget()
-        tb_conc_layout = QHBoxLayout(tb_conc_widget)
+        self.tb_conc_widget = QWidget()
+        tb_conc_layout = QHBoxLayout(self.tb_conc_widget)
         tb_conc_layout.setContentsMargins(6, 0, 6, 0)
         tb_conc_layout.setSpacing(6)
 
@@ -270,13 +454,14 @@ class MainWindow(QMainWindow):
         self.spin_tb_concurrent.valueChanged.connect(self._on_toolbar_concurrent_changed)
         tb_conc_layout.addWidget(self.spin_tb_concurrent)
 
-        toolbar.addWidget(tb_conc_widget)
+        self.act_conc_widget = toolbar.addWidget(self.tb_conc_widget)
 
-        toolbar.addSeparator()
+        sep_sched2 = toolbar.addSeparator()
+        self.adv_toolbar_separators.append(sep_sched2)
 
         # Scheduler Quick Control Widget on Toolbar
-        tb_sched_widget = QWidget()
-        tb_sched_layout = QHBoxLayout(tb_sched_widget)
+        self.tb_sched_widget = QWidget()
+        tb_sched_layout = QHBoxLayout(self.tb_sched_widget)
         tb_sched_layout.setContentsMargins(6, 0, 6, 0)
         tb_sched_layout.setSpacing(6)
 
@@ -301,13 +486,14 @@ class MainWindow(QMainWindow):
         btn_sched_cfg.clicked.connect(self._show_scheduler_dialog)
         tb_sched_layout.addWidget(btn_sched_cfg)
 
-        toolbar.addWidget(tb_sched_widget)
+        self.act_sched_widget = toolbar.addWidget(self.tb_sched_widget)
 
-        toolbar.addSeparator()
+        sep_lim = toolbar.addSeparator()
+        self.adv_toolbar_separators.append(sep_lim)
 
         # Global Speed Limiter Widget on Toolbar (IDM Quick Limiter)
-        tb_limiter_widget = QWidget()
-        tb_limiter_layout = QHBoxLayout(tb_limiter_widget)
+        self.tb_limiter_widget = QWidget()
+        tb_limiter_layout = QHBoxLayout(self.tb_limiter_widget)
         tb_limiter_layout.setContentsMargins(6, 0, 6, 0)
         tb_limiter_layout.setSpacing(8)
 
@@ -345,13 +531,14 @@ class MainWindow(QMainWindow):
         self.lbl_tb_limit_val.setStyleSheet("font-weight: bold; color: #9ece6a; min-width: 75px;")
         tb_limiter_layout.addWidget(self.lbl_tb_limit_val)
 
-        toolbar.addWidget(tb_limiter_widget)
+        self.act_limiter_widget = toolbar.addWidget(self.tb_limiter_widget)
 
-        toolbar.addSeparator()
+        sep_qa = toolbar.addSeparator()
+        self.adv_toolbar_separators.append(sep_qa)
 
         # Queue Completion Power Action Widget on Toolbar
-        tb_queue_widget = QWidget()
-        tb_queue_layout = QHBoxLayout(tb_queue_widget)
+        self.tb_queue_widget = QWidget()
+        tb_queue_layout = QHBoxLayout(self.tb_queue_widget)
         tb_queue_layout.setContentsMargins(6, 0, 6, 0)
         tb_queue_layout.setSpacing(6)
 
@@ -371,7 +558,19 @@ class MainWindow(QMainWindow):
         self.combo_tb_queue_action.currentIndexChanged.connect(self._on_toolbar_queue_action_changed)
         tb_queue_layout.addWidget(self.combo_tb_queue_action)
 
-        toolbar.addWidget(tb_queue_widget)
+        self.act_queue_widget = toolbar.addWidget(self.tb_queue_widget)
+
+        # Toolbar Spacer and Mode Switcher (Basit / Gelişmiş Mod Geçişi)
+        tb_spacer = QWidget()
+        tb_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(tb_spacer)
+
+        self.btn_mode_toggle = QPushButton("🟢 Basit Mod (Geç: Gelişmiş ❯)")
+        self.btn_mode_toggle.setObjectName("btn_mode_toggle")
+        self.btn_mode_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_mode_toggle.clicked.connect(self._toggle_ui_mode)
+        toolbar.addWidget(self.btn_mode_toggle)
+
 
         # Central Widget
         central = QWidget()
@@ -527,6 +726,9 @@ class MainWindow(QMainWindow):
         self.shortcut_delete = QShortcut(QKeySequence.StandardKey.Delete, self.table)
         self.shortcut_delete.activated.connect(self._delete_selected)
 
+        self.shortcut_shift_delete = QShortcut(QKeySequence("Shift+Delete"), self.table)
+        self.shortcut_shift_delete.activated.connect(self._delete_selected_with_files)
+
         # Queue reordering shortcuts (Ctrl+Up / Ctrl+Down)
         self.shortcut_up = QShortcut(QKeySequence("Ctrl+Up"), self.table)
         self.shortcut_up.activated.connect(lambda: self._move_selected_queue("up"))
@@ -551,8 +753,10 @@ class MainWindow(QMainWindow):
         # Status Bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.lbl_ext_status = QLabel("🟢 Tarayıcı Köprüsü: Aktif (Port 28710)")
-        self.lbl_ext_status.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 10px;")
+        self.lbl_ext_status = QLabel("Tarayıcı Köprüsü: Başlatılıyor...")
+        self.lbl_ext_status.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-left: 10px; cursor: pointer;")
+        self.lbl_ext_status.setToolTip("Tarayıcı köprüsü durumunu görmek veya yapılandırmak için tıklayın.")
+        self.lbl_ext_status.mousePressEvent = self._on_lbl_ext_status_clicked
         self.status_bar.addWidget(self.lbl_ext_status)
 
         # Real-time Bandwidth Sparkline Graph (Clickable -> Opens Statistics)
@@ -623,7 +827,9 @@ class MainWindow(QMainWindow):
 
         # Connect power countdown callbacks
         self.power_mgr.on_tick = lambda remaining, action: self.sig_countdown_tick.emit(remaining, action)
-        self.power_mgr.on_executed = lambda action: self.sig_countdown_executed.emit(action)
+        self.power_mgr.on_confirm_requested = lambda action: self._on_power_confirm_requested(action)
+        self.power_mgr.on_suspended = lambda reason: self.sig_countdown_suspended.emit(reason)
+        self.power_mgr.on_resumed = lambda: self.sig_countdown_resumed.emit()
 
         # Connect scheduler callbacks
         self.scheduler.on_tick = lambda info: self.sig_scheduler_tick.emit(info)
@@ -636,9 +842,12 @@ class MainWindow(QMainWindow):
         self.sig_status_update.connect(self._handle_status_update)
         self.sig_task_added.connect(self._handle_task_added)
         self.sig_bridge_download.connect(self._handle_bridge_download)
+        self.sig_bridge_status.connect(self._handle_bridge_status)
         self.sig_queue_empty.connect(self._handle_queue_empty)
         self.sig_countdown_tick.connect(self._handle_countdown_tick)
         self.sig_countdown_executed.connect(self._handle_countdown_executed)
+        self.sig_countdown_suspended.connect(self._handle_countdown_suspended)
+        self.sig_countdown_resumed.connect(self._handle_countdown_resumed)
         self.sig_scheduler_tick.connect(self._handle_scheduler_tick)
         self.sig_scheduler_started.connect(self._handle_scheduler_started)
         self.sig_scheduler_stopped.connect(self._handle_scheduler_stopped)
@@ -846,7 +1055,9 @@ class MainWindow(QMainWindow):
                             try:
                                 os.startfile(os.path.abspath(spath))
                             except Exception as e:
-                                print(f"[AutoOpen] Could not open {spath}: {e}")
+                                logger.error(f"Dosya otomatik açılamadı ({spath}): {e}")
+                                self.statusBar().showMessage(f"❌ Dosya açılamadı: {rec['filename']} - {e}", 5000)
+                                self.tray.notify_warning("Dosya Açılamadı", f"{rec['filename']} açılamadı: {e}")
 
                     # Auto-extract archives on completion
                     auto_extract_global = bool(self.db.get_setting("auto_extract_archives", False))
@@ -870,8 +1081,50 @@ class MainWindow(QMainWindow):
                 if bool(self.db.get_setting("sound_notifications", True)):
                     play_error_sound()
 
+            elif status == "CorruptState":
+                # Bozuk durum dosyası: kullanıcıya 'yeniden dene' / 'devam et' seçimi sun.
+                self._ask_corrupt_state_action(download_id, err)
+
         if download_id in self.active_dialogs:
             self.active_dialogs[download_id].update_status(status, err)
+
+    def _ask_corrupt_state_action(self, download_id: str, message: str):
+        """Bozuk indirme durumu dosyası durumunda kullanıcıya yeniden dene / devam et seçimi sunar."""
+        dl = self.queue_mgr.get_downloader(download_id)
+        if dl is None:
+            return
+
+        rec = self.queue_mgr.get_download(download_id)
+        fname = rec.get("filename") if rec else (dl.filename or download_id)
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Bozuk İndirme Durumu - RipSync")
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setText(f"<h3>{fname} için indirme durumu dosyası bozuk.</h3>")
+        msg_box.setInformativeText(
+            "Yarıda biten dosya diskte korunuyor ve silinmeyecek.\n\n"
+            f"Durum: {message or 'Durum dosyası okunamadı veya bozuk.'}\n\n"
+            "Nasıl devam etmek istersiniz?"
+        )
+        btn_retry = msg_box.addButton("🔄 Yeniden Dene (Baştan, Tek Bağlantı)", QMessageBox.ButtonRole.AcceptRole)
+        btn_resume = msg_box.addButton("▶️ Devam Et (Dosyadan Kaldığı Yerden, Tek Bağlantı)", QMessageBox.ButtonRole.ActionRole)
+        btn_keep = msg_box.addButton("⏹️ İptal Et (Dosyayı Koru)", QMessageBox.ButtonRole.DestructiveRole)
+        msg_box.setDefaultButton(btn_resume)
+
+        try:
+            msg_box.exec()
+        except Exception:
+            return
+
+        clicked = msg_box.clickedButton()
+        if clicked == btn_retry:
+            dl.retry()
+        elif clicked == btn_resume:
+            dl.resume()
+        else:
+            # İptal Et (Dosyayı Koru): durumu duraklatılmış/kayıtsız olarak işaretle,
+            # indirmeyi sonlandır ve dosyayı diskte bırak.
+            dl.pause()
 
     def _handle_task_added(self, rec: Dict[str, Any]):
         self._add_or_update_table_row(rec)
@@ -909,6 +1162,104 @@ class MainWindow(QMainWindow):
         dlg.download_confirmed.connect(self._on_download_confirmed)
         dlg.exec()
 
+    def set_bridge_server(self, bridge_server):
+        """Attaches bridge server instance and updates UI status."""
+        self.bridge_server = bridge_server
+        if self.bridge_server:
+            if self.bridge_server.is_running:
+                st = "running_fallback" if self.bridge_server.conflict_detected else "running"
+                self._handle_bridge_status(st, self.bridge_server.actual_port, "")
+            elif self.bridge_server.conflict_detected:
+                self._handle_bridge_status("conflict", self.bridge_server.port, self.bridge_server.error_message or "")
+
+    def restart_bridge_server(self, new_port: Optional[int] = None) -> bool:
+        """Restarts the bridge server, optionally applying a new port."""
+        port = int(new_port if new_port is not None else self.db.get_setting("extension_port", 28710))
+        token = self.db.get_or_create_bridge_token()
+        if self.bridge_server:
+            success = self.bridge_server.restart(new_port=port, wait_for_ready=True)
+            if success:
+                from server.bridge_server import write_extension_config
+                write_extension_config(token=token, port=self.bridge_server.actual_port)
+            return success
+        else:
+            from server.bridge_server import BridgeServer, write_extension_config
+            self.bridge_server = BridgeServer(
+                host="127.0.0.1",
+                port=port,
+                auth_token=token,
+                on_download_request=lambda data: self.sig_bridge_download.emit(data),
+                on_media_detected=lambda data: None,
+                auto_fallback=True,
+                on_status_change=lambda st, p, msg: self.sig_bridge_status.emit(st, p, msg or "")
+            )
+            success = self.bridge_server.start(wait_for_ready=True)
+            if success:
+                write_extension_config(token=token, port=self.bridge_server.actual_port)
+            return success
+
+    def _handle_bridge_status(self, status: str, port: int, message: str):
+        """Updates the status bar indicator and delivers warnings on conflict."""
+        if status == "running":
+            self.lbl_ext_status.setText(f"🟢 Tarayıcı Köprüsü: Aktif (Port {port})")
+            self.lbl_ext_status.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setToolTip(f"Köprü sunucusu 127.0.0.1:{port} adresinde aktif.\nKurulum kılavuzu için tıklayın.")
+        elif status == "running_fallback":
+            self.lbl_ext_status.setText(f"🟡 Tarayıcı Köprüsü: Aktif (Port {port} - Çakışma Çözüldü)")
+            self.lbl_ext_status.setStyleSheet("color: #e0af68; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setToolTip(f"{message}\nTarayıcı eklentisi bu yeni porta otomatik bağlanacaktır.\nDetaylar için tıklayın.")
+            if hasattr(self, "tray") and self.tray:
+                self.tray.showMessage(
+                    "RipSync - Port Çakışması Çözüldü",
+                    f"Varsayılan port kullanımda olduğu için köprü sunucusu otomatik olarak {port} portuna geçirildi.",
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    5000
+                )
+        elif status == "conflict":
+            self.lbl_ext_status.setText(f"🔴 Tarayıcı Köprüsü: Port Çakışması (Port {port})")
+            self.lbl_ext_status.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setToolTip(f"Port {port} başka bir program tarafından kullanılıyor!\nAyarları açıp portu değiştirmek için tıklayın.")
+            if hasattr(self, "tray") and self.tray:
+                self.tray.showMessage(
+                    "RipSync - Port Çakışması",
+                    f"Port {port} başka bir program tarafından kullanılıyor. Lütfen Ayarlar'dan portu değiştirin.",
+                    QSystemTrayIcon.MessageIcon.Critical,
+                    6000
+                )
+        elif status == "error":
+            self.lbl_ext_status.setText(f"🔴 Tarayıcı Köprüsü: Hata (Port {port})")
+            self.lbl_ext_status.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setToolTip(f"Köprü sunucusu hatası: {message}\nTekrar denemek için tıklayın.")
+        elif status == "stopped":
+            self.lbl_ext_status.setText("⚪ Tarayıcı Köprüsü: Kapalı")
+            self.lbl_ext_status.setStyleSheet("color: #565f89; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setToolTip("Köprü sunucusu durduruldu.")
+
+    def _on_lbl_ext_status_clicked(self, event):
+        """Opens settings if there is a conflict/error, or guide if running."""
+        if self.bridge_server and not self.bridge_server.is_running and self.bridge_server.conflict_detected:
+            self._show_settings_dialog()
+        else:
+            self._show_extension_guide()
+
+    def _check_clipboard_first_run_consent(self):
+        """Prompt user on first launch to ask if they want clipboard monitoring enabled."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+
+        clip_cfg = self.db.get_clipboard_settings()
+        if clip_cfg.get("prompted", False):
+            return
+
+        from ui.clipboard_consent_dialog import ClipboardConsentDialog
+        consent = ClipboardConsentDialog.ask_consent(self)
+
+        self.db.save_clipboard_settings({
+            "enabled": consent,
+            "prompted": True
+        })
+        self.clip_monitor.set_enabled(consent)
+
     def _on_clipboard_link_detected(self, url: str, info: dict):
         """Called when ClipboardMonitor detects a downloadable or video URL."""
         # Show sleek toast notification popup
@@ -944,6 +1295,21 @@ class MainWindow(QMainWindow):
             default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
             conns = int(self.db.get_setting("connections", 8))
             pref_quality = self.db.get_setting("preferred_quality", "max")
+
+            # Check overwrite conflict if action is overwrite
+            conflict_action = self.db.get_conflict_setting()
+            target_check_path = os.path.join(default_dir, candidate_filename) if candidate_filename else ""
+            if conflict_action == "overwrite" and target_check_path and os.path.exists(target_check_path):
+                from ui.overwrite_dialog import OverwriteConfirmDialog
+                dlg_ow = OverwriteConfirmDialog(default_dir, candidate_filename, parent=self)
+                if dlg_ow.exec():
+                    ow_act = dlg_ow.get_action()
+                    if ow_act == OverwriteConfirmDialog.ACTION_CANCEL:
+                        return
+                    elif ow_act == OverwriteConfirmDialog.ACTION_AUTO_RENAME:
+                        candidate_filename = dlg_ow.get_resolved_filename()
+                else:
+                    return
 
             did = self.queue_mgr.add_download(
                 url=url,
@@ -1005,6 +1371,38 @@ class MainWindow(QMainWindow):
         """
         if not items:
             return
+
+        conflict_action = self.db.get_conflict_setting()
+        if conflict_action == "overwrite":
+            conflicted_items = [
+                it for it in items
+                if os.path.exists(os.path.join(it["save_dir"], it["filename"]))
+            ]
+            if conflicted_items:
+                names_summary = "\n".join([f"- {it['filename']}" for it in conflicted_items[:5]])
+                if len(conflicted_items) > 5:
+                    names_summary += f"\n... ve {len(conflicted_items) - 5} dosya daha"
+                
+                reply = QMessageBox.warning(
+                    self,
+                    "⚠️ Çalma Listesi Dosya Üzerine Yazma Onayı",
+                    f"Çalma listesindeki {len(conflicted_items)} dosya hedef klasörde zaten mevcut:\n\n"
+                    f"{names_summary}\n\n"
+                    "Dosya çakışması ayarınız 'Üzerine Yaz' olarak seçilmiş.\n"
+                    "Bu dosyaların üzerine yazılmasını onaylıyor musunuz?\n\n"
+                    "- 'Evet': Mevcut dosyaların üzerine yazılır.\n"
+                    "- 'Hayır': Çakışan dosyalar otomatik yeniden adlandırılır ('dosya (1).ext').\n"
+                    "- 'İptal': İndirme işlemi iptal edilir.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Cancel:
+                    return
+                elif reply == QMessageBox.StandardButton.No:
+                    from core.paths import resolve_file_conflict
+                    for it in items:
+                        new_name, _ = resolve_file_conflict(it["save_dir"], it["filename"], action="auto_rename")
+                        it["filename"] = new_name
 
         added_ids = []
         first_id = None
@@ -1084,6 +1482,7 @@ class MainWindow(QMainWindow):
         dlg.cancel_requested.connect(self.queue_mgr.cancel_download)
         dlg.speed_limit_changed.connect(self._handle_single_task_speed_limit)
         dlg.auto_open_changed.connect(lambda did, chk: self.db.update_download(did, auto_open=1 if chk else 0))
+        dlg.refresh_url_requested.connect(self._show_refresh_url_dialog)
 
         self.active_dialogs[download_id] = dlg
         dlg.show()
@@ -1131,54 +1530,83 @@ class MainWindow(QMainWindow):
 
     def _cancel_selected(self):
         dids = self._get_selected_download_ids()
-        for did in dids:
-            self.queue_mgr.cancel_download(did)
+        if not dids:
+            return
+
+        count = len(dids)
+        title = "İndirmeyi İptal Et" if count == 1 else "İndirmeleri İptal Et"
+        target_desc = "seçili indirmeyi" if count == 1 else f"seçili {count} adet indirmeyi"
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(f"{title} - RipSync")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setText(f"<h3>{target_desc.capitalize()} iptal etmek yerine duraklatmak ister misiniz?</h3>")
+        msg_box.setInformativeText(
+            "Duraklatırsanız indirilen kısımlar diskte korunur ve dilediğiniz zaman kaldığı yerden devam edebilirsiniz.\n\n"
+            "İptal ederseniz indirme süreci sonlandırılacaktır."
+        )
+
+        btn_pause = msg_box.addButton("⏸️ Duraklat (Önerilen)", QMessageBox.ButtonRole.AcceptRole)
+        btn_cancel_keep = msg_box.addButton("⏹️ İptal Et (Dosyaları Koru)", QMessageBox.ButtonRole.ActionRole)
+        btn_cancel_delete = msg_box.addButton("🗑️ İptal Et ve Dosyaları Sil", QMessageBox.ButtonRole.DestructiveRole)
+        btn_dismiss = msg_box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)
+
+        try:
+            msg_box.setDefaultButton(btn_pause)
+        except Exception:
+            pass
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == btn_pause:
+            for did in dids:
+                self.queue_mgr.pause_download(did)
+        elif clicked == btn_cancel_keep:
+            for did in dids:
+                self.queue_mgr.cancel_download(did, delete_file=False)
+        elif clicked == btn_cancel_delete:
+            for did in dids:
+                self.queue_mgr.cancel_download(did, delete_file=True)
 
     def _delete_selected(self):
         dids = self._get_selected_download_ids()
         if not dids:
             return
-        count = len(dids)
-        if count == 1:
-            msg = "Bu indirmeyi listeden silmek istediğinize emin misiniz?"
-            title = "İndirmeyi Sil"
-        else:
-            msg = f"Seçilen {count} adet indirmeyi listeden kaldırmak istediğinize emin misiniz?"
-            title = "Toplu Silme (Listeden Kaldır)"
+        records = [self.queue_mgr.get_download(did) for did in dids if self.queue_mgr.get_download(did)]
+        if not records:
+            records = [{"id": did, "filename": f"İndirme #{did}", "save_path": "", "status": "Unknown"} for did in dids]
 
-        reply = QMessageBox.question(
-            self,
-            title,
-            msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            for did in dids:
-                self.queue_mgr.delete_download(did, delete_file=False)
-            self._load_downloads_to_table()
+        dlg = DeleteConfirmDialog(records, initial_delete_file=False, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            del_file = dlg.get_delete_file_choice()
+            if del_file is not None:
+                for did in dids:
+                    self.queue_mgr.delete_download(did, delete_file=del_file)
+                self._load_downloads_to_table()
+                if del_file:
+                    self.statusBar().showMessage(f"💥 {len(dids)} adet indirme ve dosyası kalıcı olarak silindi.", 4000)
+                else:
+                    self.statusBar().showMessage(f"🗑 {len(dids)} adet indirme listeden kaldırıldı (dosya diskte korundu).", 4000)
 
     def _delete_selected_with_files(self):
         dids = self._get_selected_download_ids()
         if not dids:
             return
-        count = len(dids)
-        if count == 1:
-            msg = "Bu indirmeyi ve indirilmiş dosyasını kalıcı olarak diskten silmek istiyor musunuz?"
-            title = "Dosyayı ve İndirmeyi Sil"
-        else:
-            msg = f"Seçilen {count} adet indirmeyi ve dosyalarını kalıcı olarak diskten silmek istiyor musunuz?"
-            title = "Toplu Dosya Silme"
+        records = [self.queue_mgr.get_download(did) for did in dids if self.queue_mgr.get_download(did)]
+        if not records:
+            records = [{"id": did, "filename": f"İndirme #{did}", "save_path": "", "status": "Unknown"} for did in dids]
 
-        reply = QMessageBox.question(
-            self,
-            title,
-            msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            for did in dids:
-                self.queue_mgr.delete_download(did, delete_file=True)
-            self._load_downloads_to_table()
+        dlg = DeleteConfirmDialog(records, initial_delete_file=True, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            del_file = dlg.get_delete_file_choice()
+            if del_file is not None:
+                for did in dids:
+                    self.queue_mgr.delete_download(did, delete_file=del_file)
+                self._load_downloads_to_table()
+                if del_file:
+                    self.statusBar().showMessage(f"💥 {len(dids)} adet indirme ve dosyası kalıcı olarak silindi.", 4000)
+                else:
+                    self.statusBar().showMessage(f"🗑 {len(dids)} adet indirme listeden kaldırıldı (dosya diskte korundu).", 4000)
 
     def _open_selected_file(self):
         did = self._get_selected_download_id()
@@ -1243,6 +1671,38 @@ class MainWindow(QMainWindow):
     def _on_batch_add_confirmed(self, items: list, start_now: bool):
         if not items:
             return
+
+        conflict_action = self.db.get_conflict_setting()
+        if conflict_action == "overwrite":
+            conflicted_items = [
+                it for it in items
+                if os.path.exists(os.path.join(it["save_dir"], it["filename"]))
+            ]
+            if conflicted_items:
+                names_summary = "\n".join([f"- {it['filename']}" for it in conflicted_items[:5]])
+                if len(conflicted_items) > 5:
+                    names_summary += f"\n... ve {len(conflicted_items) - 5} dosya daha"
+                
+                reply = QMessageBox.warning(
+                    self,
+                    "⚠️ Toplu İndirme Dosya Üzerine Yazma Onayı",
+                    f"Toplu indirme listenizdeki {len(conflicted_items)} dosya hedef klasörde zaten mevcut:\n\n"
+                    f"{names_summary}\n\n"
+                    "Dosya çakışması ayarınız 'Üzerine Yaz' olarak seçilmiş.\n"
+                    "Bu dosyaların üzerine yazılmasını onaylıyor musunuz?\n\n"
+                    "- 'Evet': Mevcut dosyaların üzerine yazılır.\n"
+                    "- 'Hayır': Çakışan dosyalar otomatik yeniden adlandırılır ('dosya (1).ext').\n"
+                    "- 'İptal': Toplu indirme işlemi iptal edilir.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Cancel:
+                    return
+                elif reply == QMessageBox.StandardButton.No:
+                    from core.paths import resolve_file_conflict
+                    for it in items:
+                        new_name, _ = resolve_file_conflict(it["save_dir"], it["filename"], action="auto_rename")
+                        it["filename"] = new_name
 
         added_ids = []
         first_id = None
@@ -1608,6 +2068,7 @@ class MainWindow(QMainWindow):
         self._load_downloads_to_table()
 
     def _show_settings_dialog(self):
+        old_port = int(self.db.get_setting("extension_port", 28710))
         dlg = SettingsDialog(self.db, self)
         if dlg.exec():
             # Apply modified settings
@@ -1634,7 +2095,7 @@ class MainWindow(QMainWindow):
 
             clip_cfg = self.db.get_clipboard_settings()
             self.clip_monitor.configure(
-                enabled=bool(clip_cfg.get("enabled", True)),
+                enabled=bool(clip_cfg.get("enabled", False)),
                 only_media=bool(clip_cfg.get("only_media", False)),
                 ignore_domains=clip_cfg.get("ignore_domains")
             )
@@ -1648,11 +2109,257 @@ class MainWindow(QMainWindow):
             else:
                 self.setStyleSheet(sheet)
 
+            # Apply UI mode if modified in settings
+            self.apply_ui_mode(self.db.get_ui_mode())
+
+            # Check if extension port was modified or server needs restart
+            new_port = int(self.db.get_setting("extension_port", 28710))
+            needs_restart = (new_port != old_port) or (self.bridge_server and not self.bridge_server.is_running)
+            if needs_restart:
+                restarted = self.restart_bridge_server(new_port)
+                if restarted:
+                    actual = self.bridge_server.actual_port if self.bridge_server else new_port
+                    self.statusBar().showMessage(f"Tarayıcı köprüsü {actual} portunda yeniden başlatıldı.", 4000)
+                else:
+                    self.statusBar().showMessage(f"Uyarı: {new_port} portunda köprü sunucusu başlatılamadı!", 5000)
+
     def _show_extension_guide(self):
-        port = int(self.db.get_setting("extension_port", 28710))
+        if self.bridge_server and self.bridge_server.actual_port:
+            port = self.bridge_server.actual_port
+        else:
+            port = int(self.db.get_setting("extension_port", 28710))
+        token = self.db.get_or_create_bridge_token()
         from ui.extension_guide_dialog import ExtensionGuideDialog
-        dlg = ExtensionGuideDialog(self, bridge_port=port)
+        dlg = ExtensionGuideDialog(self, bridge_port=port, bridge_token=token)
         dlg.exec()
+
+    def _select_and_open_extension_dir(self):
+        """Opens the extension directory in Explorer and copies the path to clipboard."""
+        from core.extension_installer import copy_extension_path_to_clipboard, get_extension_folder_path
+        from core.paths import show_in_explorer
+        ext_dir = get_extension_folder_path()
+        copy_extension_path_to_clipboard()
+        show_in_explorer(ext_dir)
+        self.statusBar().showMessage(f"Eklenti klasörü açıldı ve panoya kopyalandı: {ext_dir}", 6000)
+        QMessageBox.information(
+            self,
+            "Eklenti Klasörü Seçildi & Açıldı 📁",
+            f"RipSync eklenti klasörü Dosya Gezgini'nde açıldı ve yol panoya kopyalandı:\n\n{ext_dir}\n\n"
+            "Tarayıcınızda (chrome://extensions) 'Paketlenmemiş öğe yükle' penceresi açıldığında "
+            "Ctrl+V ile bu yolu yapıştırıp Klasörü Seç butonuna basabilirsiniz!"
+        )
+
+    def _copy_extension_dir_path(self):
+        """Copies the unpacked extension directory path to the system clipboard."""
+        from core.extension_installer import copy_extension_path_to_clipboard
+        success, path = copy_extension_path_to_clipboard()
+        if success:
+            self.statusBar().showMessage(f"Eklenti yolu panoya kopyalandı: {path}", 5000)
+            QMessageBox.information(
+                self,
+                "Yol Kopyalandı 📋",
+                f"Eklenti klasör yolu panoya kopyalandı:\n\n{path}\n\n"
+                "Tarayıcınızın 'Paketlenmemiş öğe yükle' penceresine Ctrl+V ile yapıştırabilirsiniz."
+            )
+        else:
+            QMessageBox.warning(self, "Hata", f"Yol kopyalanamadı: {path}")
+
+    def _launch_browser_with_ext(self, browser_key: str):
+        """Launches the specified browser with --load-extension flag."""
+        from core.extension_installer import launch_browser_with_extension
+        success, msg = launch_browser_with_extension(browser_key)
+        if success:
+            self.statusBar().showMessage(msg, 5000)
+            QMessageBox.information(self, "Tarayıcı Başlatıldı 🚀", f"{msg}\n\nEklenti otomatik olarak yüklendi!")
+        else:
+            QMessageBox.warning(self, "Başlatılamadı", msg)
+
+    def _show_setup_wizard(self):
+        """Opens the first-run / setup onboarding wizard."""
+        from ui.setup_wizard_dialog import SetupWizardDialog
+        dlg = SetupWizardDialog(self.db, self)
+        dlg.exec()
+
+    def _show_onboarding_dialog(self):
+        """Opens the guided onboarding interactive tour dialog."""
+        from ui.onboarding_dialog import OnboardingDialog
+        dlg = OnboardingDialog(self.db, self)
+        if hasattr(self, "apply_ui_mode"):
+            dlg.tour_finished.connect(self.apply_ui_mode)
+        dlg.exec()
+
+    def _check_first_run_onboarding(self):
+        """Checks if initial onboarding tour should be automatically displayed."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        if not self.db.is_onboarding_completed():
+            self._show_onboarding_dialog()
+
+    def _show_about_dialog(self):
+        """Displays About RipSync information dialog."""
+        QMessageBox.about(
+            self,
+            "RipSync Hakkında",
+            "<h2>RipSync Download Manager</h2>"
+            "<p>Hızlı, güvenli, gizlilik odaklı ve çok iş parçacıklı indirme yöneticisi.</p>"
+            "<p><b>Sürüm:</b> 3.8.0</p>"
+        )
+
+    def _show_about_dialog(self):
+        """Displays About RipSync information dialog."""
+        QMessageBox.about(
+            self,
+            "RipSync Hakkında",
+            "<h3>RipSync - Internet Download Manager</h3>"
+            "<p><b>Sürüm:</b> 1.0.1</p>"
+            "<p>Yüksek performanslı, çok kanallı (multi-segmented) internet indirme yöneticisi.</p>"
+            "<p>Tarayıcı eklentisi, YouTube ve akış medyası yakalama motoru entegredir.</p>"
+        )
+
+    def apply_ui_mode(self, mode: str):
+        """Basit Mod veya Gelişmiş Mod görünümünü uygular."""
+        self.ui_mode = "advanced" if mode == "advanced" else "simple"
+        self.db.save_ui_mode(self.ui_mode)
+        is_simple = (self.ui_mode == "simple")
+
+        # 1. Toolbar Aksiyonları & Widget'ları
+        adv_actions = [
+            getattr(self, 'act_playlist', None),
+            getattr(self, 'act_batch_add', None),
+            getattr(self, 'act_start_queue', None),
+            getattr(self, 'act_pause_all', None),
+            getattr(self, 'act_scheduler', None),
+            getattr(self, 'act_statistics', None),
+            getattr(self, 'act_clean_missing', None),
+            getattr(self, 'act_extension_widget', None),
+            getattr(self, 'act_conc_widget', None),
+            getattr(self, 'act_sched_widget', None),
+            getattr(self, 'act_limiter_widget', None),
+            getattr(self, 'act_queue_widget', None),
+        ]
+        for act in adv_actions:
+            if act is not None:
+                act.setVisible(not is_simple)
+
+        # Toolbar Ayırıcıları
+        for sep in getattr(self, 'adv_toolbar_separators', []):
+            if sep is not None:
+                sep.setVisible(not is_simple)
+
+        # 2. Sol Panel (Kategori Ağacı)
+        if hasattr(self, 'root_tags') and self.root_tags is not None:
+            self.root_tags.setHidden(is_simple)
+        if hasattr(self, 'root_queues') and self.root_queues is not None:
+            self.root_queues.setHidden(is_simple)
+
+        # 3. Arama & Filtreleme Çubuğu
+        if hasattr(self, 'edit_search') and self.edit_search is not None:
+            self.edit_search.setVisible(True)
+        if hasattr(self, 'filter_btn_group'):
+            for btn in self.filter_btn_group.values():
+                btn.setVisible(not is_simple)
+        if hasattr(self, 'combo_size_filter') and self.combo_size_filter is not None:
+            self.combo_size_filter.setVisible(not is_simple)
+        if hasattr(self, 'combo_date_filter') and self.combo_date_filter is not None:
+            self.combo_date_filter.setVisible(not is_simple)
+        if hasattr(self, 'lbl_filter_count') and self.lbl_filter_count is not None:
+            self.lbl_filter_count.setVisible(not is_simple)
+
+        # 4. Durum Çubuğu
+        if hasattr(self, 'speed_graph') and self.speed_graph is not None:
+            self.speed_graph.setVisible(not is_simple)
+        if hasattr(self, 'lbl_ext_status') and self.lbl_ext_status is not None:
+            self.lbl_ext_status.setVisible(not is_simple)
+        if hasattr(self, 'lbl_limiter_stat') and self.lbl_limiter_stat is not None:
+            self.lbl_limiter_stat.setVisible(not is_simple)
+        if hasattr(self, 'lbl_scheduler_stat') and self.lbl_scheduler_stat is not None:
+            self.lbl_scheduler_stat.setVisible(not is_simple)
+
+        # 5. Tablo Sütunları (Basit modda 6. sütun: Eklenme Tarihi gizlenir)
+        if hasattr(self, 'table') and self.table is not None:
+            self.table.setColumnHidden(6, is_simple)
+
+        # 6. Mod Değiştirme Butonu ve Menü Durumu
+        if hasattr(self, 'btn_mode_toggle') and self.btn_mode_toggle is not None:
+            if is_simple:
+                self.btn_mode_toggle.setText("🟢 Basit Mod (Geç: Gelişmiş ❯)")
+                self.btn_mode_toggle.setToolTip("Şu an Basit Moddasınız. Tüm gelişmiş araçları görmek için tıklayın.")
+                self.btn_mode_toggle.setStyleSheet("""
+                    QPushButton#btn_mode_toggle {
+                        background-color: #1f2335;
+                        border: 1px solid #9ece6a;
+                        color: #9ece6a;
+                        font-weight: bold;
+                        border-radius: 6px;
+                        padding: 4px 10px;
+                        font-size: 11px;
+                    }
+                    QPushButton#btn_mode_toggle:hover {
+                        background-color: #9ece6a;
+                        color: #1a1b26;
+                    }
+                """)
+            else:
+                self.btn_mode_toggle.setText("⚡ Gelişmiş Mod (Geç: Basit ❮)")
+                self.btn_mode_toggle.setToolTip("Şu an Gelişmiş Moddasınız. Sade görünüme dönmek için tıklayın.")
+                self.btn_mode_toggle.setStyleSheet("""
+                    QPushButton#btn_mode_toggle {
+                        background-color: #1f2335;
+                        border: 1px solid #bb9af7;
+                        color: #bb9af7;
+                        font-weight: bold;
+                        border-radius: 6px;
+                        padding: 4px 10px;
+                        font-size: 11px;
+                    }
+                    QPushButton#btn_mode_toggle:hover {
+                        background-color: #bb9af7;
+                        color: #1a1b26;
+                    }
+                """)
+
+        if hasattr(self, 'act_view_simple') and self.act_view_simple is not None:
+            self.act_view_simple.blockSignals(True)
+            self.act_view_simple.setChecked(is_simple)
+            self.act_view_simple.blockSignals(False)
+
+        if hasattr(self, 'act_view_advanced') and self.act_view_advanced is not None:
+            self.act_view_advanced.blockSignals(True)
+            self.act_view_advanced.setChecked(not is_simple)
+            self.act_view_advanced.blockSignals(False)
+
+    def _toggle_ui_mode(self):
+        new_mode = "advanced" if getattr(self, 'ui_mode', 'simple') == "simple" else "simple"
+        self.apply_ui_mode(new_mode)
+        mod_label = "Gelişmiş Mod" if new_mode == "advanced" else "Basit Mod"
+        self.statusBar().showMessage(f"Arayüz modu değiştirildi: {mod_label}", 4000)
+
+    def _check_first_run_onboarding(self):
+        """Uygulama ilk kez çalıştırıldığında rehberli turu (Onboarding) otomatik açar."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        import sys
+        is_tour_arg = "--onboarding" in sys.argv or "--tour" in sys.argv
+        has_completed = self.db.is_onboarding_completed()
+        if not has_completed or is_tour_arg:
+            self._show_onboarding_dialog()
+
+    def _show_onboarding_dialog(self):
+        """Hızlı Başlangıç Rehberli Tur sihirbazını açar."""
+        from ui.onboarding_dialog import OnboardingDialog
+        dlg = OnboardingDialog(self.db, parent=self)
+        dlg.tour_finished.connect(self.apply_ui_mode)
+        dlg.exec()
+
+    def _check_first_run_setup(self):
+        """Checks if initial setup wizard should be automatically displayed."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        import sys
+        has_setup = self.db.get_setting("setup_completed", False)
+        is_wizard_arg = "--setup-wizard" in sys.argv
+        if not has_setup or is_wizard_arg:
+            self._show_setup_wizard()
 
     def _show_table_context_menu(self, pos):
         item = self.table.itemAt(pos)
@@ -1710,10 +2417,12 @@ class MainWindow(QMainWindow):
                 act_mq.triggered.connect(lambda checked, qid=q["id"], dids=selected_ids: self._move_downloads_to_queue(dids, qid))
 
             menu.addSeparator()
-            act_del_bulk = menu.addAction(f"🗑 Seçilenleri Listeden Kaldır ({count})")
+            act_del_bulk = menu.addAction(f"🗑 Seçilenleri Listeden Kaldır ({count}) [Dosyalar diskte kalır]")
+            act_del_bulk.setToolTip("İndirme kayıtlarını listeden kaldırır, indirilen dosyaları diskte korur.")
             act_del_bulk.triggered.connect(self._delete_selected)
 
-            act_del_files_bulk = menu.addAction(f"💥 Seçilenleri ve Dosyalarını Tamamen Sil ({count})")
+            act_del_files_bulk = menu.addAction(f"💥 Seçilenleri ve Dosyalarını Tamamen Sil ({count}) [Diskten sil]")
+            act_del_files_bulk.setToolTip("İndirme kayıtlarını ve indirilmiş dosyaları kalıcı olarak diskten siler.")
             act_del_files_bulk.triggered.connect(self._delete_selected_with_files)
 
             menu.exec(self.table.viewport().mapToGlobal(pos))
@@ -1812,7 +2521,9 @@ class MainWindow(QMainWindow):
             act_mq.triggered.connect(lambda checked, qid=q["id"], d=did: self._move_downloads_to_queue([d], qid))
 
         if status in ("Paused", "Error", "Cancelled"):
-            act_refresh = menu.addAction("🔄 Bağlantı Adresini Yenile (Refresh URL)")
+            is_soc = is_stream_url(rec.get("url", ""))
+            act_label = "🔗 Manuel Link Gir / Bağlantıyı Yenile" if is_soc else "🔄 Bağlantı Adresini Yenile (Refresh URL)"
+            act_refresh = menu.addAction(act_label)
             act_refresh.triggered.connect(lambda: self._show_refresh_url_dialog(did))
 
         menu.addSeparator()
@@ -1830,10 +2541,12 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
 
-        act_del = menu.addAction("🗑 Listeden Kaldır")
+        act_del = menu.addAction("🗑 Listeden Kaldır (Dosya diskte kalır)")
+        act_del.setToolTip("İndirme kaydını listeden kaldırır, dosya bilgisayarınızda korunur (Delete).")
         act_del.triggered.connect(self._delete_selected)
 
-        act_del_all = menu.addAction("💥 Dosya ile Birlikte Tamamen Sil")
+        act_del_all = menu.addAction("💥 Dosya ile Birlikte Tamamen Sil (Diskten sil)")
+        act_del_all.setToolTip("İndirme kaydını ve indirilmiş dosyayı kalıcı olarak diskten siler (Shift+Delete).")
         act_del_all.triggered.connect(self._delete_selected_with_files)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
@@ -1916,15 +2629,18 @@ class MainWindow(QMainWindow):
 
     def _delete_with_file(self, download_id: Optional[str] = None):
         if download_id:
-            reply = QMessageBox.question(
-                self,
-                "Dosyayı Sil",
-                "Dosyayı ve indirilen kaydı kalıcı olarak diskten silmek istiyor musunuz?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self.queue_mgr.delete_download(download_id, delete_file=True)
-                self._load_downloads_to_table()
+            rec = self.queue_mgr.get_download(download_id)
+            records = [rec] if rec else [{"id": download_id, "filename": f"İndirme #{download_id}", "save_path": "", "status": "Unknown"}]
+            dlg = DeleteConfirmDialog(records, initial_delete_file=True, parent=self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                del_file = dlg.get_delete_file_choice()
+                if del_file is not None:
+                    self.queue_mgr.delete_download(download_id, delete_file=del_file)
+                    self._load_downloads_to_table()
+                    if del_file:
+                        self.statusBar().showMessage("💥 İndirme ve dosyası kalıcı olarak silindi.", 4000)
+                    else:
+                        self.statusBar().showMessage("🗑 İndirme listeden kaldırıldı (dosya diskte korundu).", 4000)
         else:
             self._delete_selected_with_files()
 
@@ -2160,19 +2876,105 @@ class MainWindow(QMainWindow):
         if self.power_mgr.is_active():
             return
 
-        # Show countdown dialog
+        # Settings
+        suspend_if_active = bool(self.db.get_setting("suspend_power_action_if_active", True))
+        idle_threshold = int(self.db.get_setting("active_idle_threshold_seconds", 60))
+        show_desktop_notif = bool(self.db.get_setting("power_desktop_notification", True))
+        show_browser_notif = bool(self.db.get_setting("power_browser_notification", True))
+
+        # Check if user is actively using the computer right now
+        if suspend_if_active and is_user_active(idle_threshold):
+            idle_sec = get_idle_duration_seconds()
+            reason = f"Aktif bilgisayar kullanımı algılandı (Son etkileşim: {int(idle_sec)} sn önce)"
+            logger.info(f"[PowerManager] {reason}. Otomatik {action} işlemi askıya alındı.")
+
+            # Show suspended desktop notification + sound
+            if show_desktop_notif:
+                notify_power_suspended(action=action, reason=reason, sound=True)
+
+            self.tray.showMessage(
+                "Güç Yönetimi (Askıya Alındı)",
+                f"Aktif kullanım algılandığı için bilgisayarı {action} eylemi askıya alındı. Açık işleriniz korundu.",
+                QSystemTrayIcon.MessageIcon.Information if hasattr(QSystemTrayIcon, "MessageIcon") else 1,
+                5000
+            )
+
+            # Show dialog already in suspended state so user can resume or execute if they want
+            self.power_dialog = PowerCountdownDialog(action=action, total_seconds=30, parent=self)
+            self.power_dialog.set_suspended(True, reason=reason)
+            self.power_dialog.cancelled.connect(self._cancel_power_countdown)
+            self.power_dialog.confirmed.connect(self._execute_power_immediately)
+            self.power_dialog.suspend_requested.connect(self._suspend_power_countdown)
+            self.power_dialog.resume_requested.connect(self._resume_power_countdown)
+
+            # Put manager in suspended state
+            self.power_mgr.start_countdown(action, seconds=30)
+            self.power_mgr.suspend(reason=reason)
+
+            self.power_dialog.show()
+            self.power_dialog.raise_()
+            self.power_dialog.activateWindow()
+            return
+
+        # User is away / idle: start countdown
         self.power_dialog = PowerCountdownDialog(action=action, total_seconds=30, parent=self)
         self.power_dialog.cancelled.connect(self._cancel_power_countdown)
-        self.power_dialog.accepted.connect(self._execute_power_immediately)
+        self.power_dialog.confirmed.connect(self._execute_power_immediately)
+        self.power_dialog.suspend_requested.connect(self._suspend_power_countdown)
+        self.power_dialog.resume_requested.connect(self._resume_power_countdown)
 
         self.power_mgr.start_countdown(action, seconds=30)
+
+        # 1. Desktop notification + warning chime
+        if show_desktop_notif:
+            notify_power_countdown(action=action, remaining_seconds=30, sound=True)
+
+        # 2. Browser notification / tab alert
+        if show_browser_notif and self.bridge_server:
+            open_browser_power_alert(port=self.bridge_server.actual_port, token=self.bridge_server.auth_token or "")
+
         self.power_dialog.show()
         self.power_dialog.raise_()
         self.power_dialog.activateWindow()
 
     def _handle_countdown_tick(self, remaining: int, action: str):
+        # Auto-suspend during countdown if user starts using the computer
+        suspend_if_active = bool(self.db.get_setting("suspend_power_action_if_active", True))
+        if suspend_if_active and is_user_active(threshold_seconds=5) and not self.power_mgr.is_suspended:
+            reason = "Geri sayım sırasında klavye/fare etkileşimi algılandı"
+            self.power_mgr.suspend(reason=reason)
+            return
+
         if self.power_dialog and self.power_dialog.isVisible():
             self.power_dialog.update_countdown(remaining)
+
+    def _handle_countdown_suspended(self, reason: str = ""):
+        if self.power_dialog and self.power_dialog.isVisible():
+            self.power_dialog.set_suspended(True, reason=reason)
+        if bool(self.db.get_setting("power_desktop_notification", True)):
+            notify_power_suspended(action=self.current_queue_action, reason=reason, sound=True)
+        self.tray.showMessage(
+            "Güç Yönetimi",
+            f"Kapatma işlemi askıya alındı: {reason}",
+            QSystemTrayIcon.MessageIcon.Information if hasattr(QSystemTrayIcon, "MessageIcon") else 1,
+            4000
+        )
+
+    def _handle_countdown_resumed(self):
+        if self.power_dialog and self.power_dialog.isVisible():
+            self.power_dialog.set_suspended(False)
+        self.tray.showMessage(
+            "Güç Yönetimi",
+            "Kapatma geri sayımı yeniden başlatıldı.",
+            QSystemTrayIcon.MessageIcon.Information if hasattr(QSystemTrayIcon, "MessageIcon") else 1,
+            2000
+        )
+
+    def _suspend_power_countdown(self):
+        self.power_mgr.suspend(reason="Kullanıcı diyalogdan askıya aldı")
+
+    def _resume_power_countdown(self):
+        self.power_mgr.resume()
 
     def _handle_countdown_executed(self, action: str):
         if self.power_dialog:
@@ -2202,6 +3004,12 @@ class MainWindow(QMainWindow):
             execute_shutdown(timeout_seconds=0)
         elif act == "sleep":
             execute_sleep()
+
+    def _on_power_confirm_requested(self, action: str):
+        """Countdown reached zero: show an explicit confirmation before acting."""
+        from ui.power_countdown_dialog import PowerCountdownDialog
+        if PowerCountdownDialog.request_confirmation(action, self):
+            self._execute_power_immediately()
 
     def _move_download_order(self, download_id: str, direction: str):
         if direction == "top":
@@ -2235,6 +3043,9 @@ class MainWindow(QMainWindow):
                 self.lbl_disk_stat.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 15px;")
             else:
                 self.lbl_disk_stat.setStyleSheet("color: #7dcfff; font-weight: bold; margin-left: 15px;")
+        else:
+            self.lbl_disk_stat.setText("💾 Disk: Bilgi alınamadı")
+            self.lbl_disk_stat.setStyleSheet("color: #ff9e64; font-weight: bold; margin-left: 15px;")
 
     def _show_statistics_dialog(self):
         default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
@@ -2264,8 +3075,9 @@ class MainWindow(QMainWindow):
                             with open(local_p, 'r', encoding='utf-8', errors='ignore') as f:
                                 extracted = extract_valid_urls(f.read())
                                 urls.extend(extracted)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Sürüklenen dosya okunamadı ({local_p}): {e}")
+                            self.statusBar().showMessage(f"❌ Dosya okunamadı: {os.path.basename(local_p)}", 4000)
                 else:
                     s = u.toString().strip()
                     if s.startswith(('http://', 'https://')):
@@ -2372,7 +3184,7 @@ class MainWindow(QMainWindow):
             return
         self.power_dialog = PowerCountdownDialog(action=action, total_seconds=30, parent=self)
         self.power_dialog.cancelled.connect(self._cancel_power_countdown)
-        self.power_dialog.accepted.connect(self._execute_power_immediately)
+        self.power_dialog.confirmed.connect(self._execute_power_immediately)
         self.power_mgr.start_countdown(action, seconds=30)
         self.power_dialog.show()
         self.power_dialog.raise_()
@@ -2387,9 +3199,17 @@ class MainWindow(QMainWindow):
 
     def _quit_application(self):
         """Cleanly quits the application from tray menu."""
+        try:
+            self.queue_manager.flush_progress()
+        except Exception:
+            pass
         self.scheduler.stop()
         self.power_mgr.cancel()
         self.tray.hide()
+        try:
+            self.db.close()
+        except Exception:
+            pass
         QApplication.instance().quit()
 
     def closeEvent(self, event):
@@ -2406,7 +3226,15 @@ class MainWindow(QMainWindow):
                 2000
             )
         else:
+            try:
+                self.queue_manager.flush_progress()
+            except Exception:
+                pass
             self.scheduler.stop()
             self.power_mgr.cancel()
             self.tray.hide()
+            try:
+                self.db.close()
+            except Exception:
+                pass
             event.accept()

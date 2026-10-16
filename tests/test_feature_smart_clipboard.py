@@ -50,22 +50,26 @@ def test_clipboard_only_media_mode():
 
 def test_clipboard_settings_database(mem_db):
     default_cfg = mem_db.get_clipboard_settings()
-    assert default_cfg["enabled"] is True
+    assert default_cfg["enabled"] is False
     assert default_cfg["only_media"] is False
+    assert default_cfg["prompted"] is False
     assert "google.com" in default_cfg["ignore_domains"]
 
-    # Save new configuration
+    # Save new configuration (e.g. user consents and activates clipboard monitoring)
     new_cfg = {
-        "enabled": False,
+        "enabled": True,
         "only_media": True,
-        "ignore_domains": ["example.com", "test.com"]
+        "ignore_domains": ["example.com", "test.com"],
+        "prompted": True
     }
     mem_db.save_clipboard_settings(new_cfg)
 
     loaded = mem_db.get_clipboard_settings()
-    assert loaded["enabled"] is False
+    assert loaded["enabled"] is True
     assert loaded["only_media"] is True
+    assert loaded["prompted"] is True
     assert "example.com" in loaded["ignore_domains"]
     # Check backward compatibility setting
-    assert mem_db.get_setting("clipboard_enabled") is False
+    assert mem_db.get_setting("clipboard_enabled") is True
+    assert mem_db.get_setting("clipboard_prompted") is True
 
