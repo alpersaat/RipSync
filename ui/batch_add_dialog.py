@@ -271,7 +271,8 @@ class BatchAddDialog(QDialog):
         self.spin_conns = QSpinBox()
         self.spin_conns.setRange(1, 32)
         self.spin_conns.setValue(self.default_connections)
-        f_opts.addRow("İndirme Başına Parça Sayısı:", self.spin_conns)
+        from ui.language import label_pair
+        f_opts.addRow(label_pair("Dosya başına parça:", "İndirme Başına Parça Sayısı:"), self.spin_conns)
 
         # Quality
         self.combo_quality = QComboBox()

@@ -112,9 +112,13 @@ class DownloadPropertiesDialog(QDialog):
         f_net.addRow("Yönlendiren (Referer):", ref_row)
 
         conns = self.rec.get("connections", 8)
-        lbl_conns = QLabel(f"{conns} Eşzamanlı Parça / Bağlantı (Range Split)")
+        from ui.language import label_pair
+        lbl_conns = QLabel(label_pair(
+            f"{conns} parça (aynı anda iniyor, kaldığı yerden devam eder)",
+            f"{conns} Eşzamanlı Parça / Bağlantı (Range Split)"
+        ))
         lbl_conns.setStyleSheet(f"color: {T['color_purple']};")
-        f_net.addRow("Kanal Sayısı:", lbl_conns)
+        f_net.addRow(label_pair("Parça Sayısı:", "Kanal Sayısı:"), lbl_conns)
 
         quality = self.rec.get("quality", "max")
         lbl_quality = QLabel(quality.upper() if quality else "Maksimum")

@@ -185,7 +185,8 @@ class AddDownloadDialog(QDialog):
         self.spin_connections = QSpinBox()
         self.spin_connections.setRange(1, 32)
         self.spin_connections.setValue(8)
-        form.addRow("Bağlantı Sayısı (Parça):", self.spin_connections)
+        from ui.language import label_pair
+        form.addRow(label_pair("Parça Sayısı (aynı anda inen):", "Bağlantı Sayısı (Parça):"), self.spin_connections)
 
         # Priority (Bandwidth weighting)
         self.combo_priority = QComboBox()

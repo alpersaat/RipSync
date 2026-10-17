@@ -7,7 +7,8 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QToolBar, QPushButton,
     QLabel, QProgressBar, QMenu, QMessageBox, QStatusBar,
     QApplication, QSystemTrayIcon, QSlider, QCheckBox, QComboBox, QSpinBox,
-    QLineEdit, QFileDialog, QInputDialog, QToolButton, QSizePolicy, QDialog
+    QLineEdit, QFileDialog, QInputDialog, QToolButton, QSizePolicy, QDialog,
+    QStackedWidget, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut, QDrag, QDragEnterEvent, QDropEvent
@@ -66,11 +67,156 @@ class NumericTableWidgetItem(QTableWidgetItem):
 
 
 class DownloadsTableWidget(QTableWidget):
-    """Custom table widget supporting drag & drop outward (dragging completed files to Explorer/apps)."""
+    """Custom table widget supporting drag & drop outward (dragging completed files to Explorer/apps)
+    and hover quick actions (pause/open/reveal) at row level."""
+
+    HOVER_ACTIONS = ("toggle", "open", "folder")
+
     def __init__(self, parent_window=None, parent=None):
         super().__init__(parent)
         self.parent_window = parent_window
         self.setDragEnabled(True)
+        self.setMouseTracking(True)
+        self._hover_row = -1
+        self._hover_bar: QFrame = None
+        self._hover_buttons: dict = {}
+
+    # ---- Satır üstü hızlı eylemler ------------------------------------------
+    def _ensure_hover_bar(self):
+        if self._hover_bar is None:
+            bar = QFrame(self.viewport())
+            bar.setObjectName("row_hover_bar")
+            bar.setStyleSheet(
+                f"QFrame#row_hover_bar {{ background-color: {T['bg_card']};"
+                f" border: 1px solid {T['border']}; border-radius: 6px; }}"
+                "QPushButton { background: transparent; border: none; padding: 2px 5px; font-size: 13px; }"
+                f"QPushButton:hover {{ background-color: {T['bg_hover']}; border-radius: 4px; }}"
+            )
+            lay = QHBoxLayout(bar)
+            lay.setContentsMargins(2, 0, 2, 0)
+            lay.setSpacing(1)
+            self._btn_toggle = QPushButton("⏯")
+            self._btn_toggle.setToolTip("Duraklat / Devam Ettir")
+            self._btn_open = QPushButton("📂")
+            self._btn_open.setToolTip("Dosyayı Aç")
+            self._btn_folder = QPushButton("📁")
+            self._btn_folder.setToolTip("Klasörde Göster")
+            for btn, act in (
+                (self._btn_toggle, self._act_toggle),
+                (self._btn_open, self._act_open),
+                (self._btn_folder, self._act_folder),
+            ):
+                btn.setFixedSize(26, 22)
+                btn.clicked.connect(act)
+                lay.addWidget(btn)
+            self._hover_bar = bar
+            bar.hide()
+
+    def _row_download(self, row):
+        if self.parent_window is None or row < 0:
+            return None
+        item = self.item(row, 0)
+        if not item:
+            return None
+        did = item.data(Qt.ItemDataRole.UserRole)
+        try:
+            return self.parent_window.queue_mgr.get_download(did), did
+        except Exception:
+            return None, None
+
+    def _act_toggle(self):
+        rec, did = self._row_download(self._hover_row)
+        if not rec or not did:
+            return
+        qm = self.parent_window.queue_mgr
+        status = rec.get("status")
+        if status == "Downloading":
+            qm.pause_download(did)
+        elif status in ("Paused", "Queued", "Error"):
+            qm.resume_download(did) if hasattr(qm, "resume_download") else qm.start_download(did)
+        else:
+            qm.start_download(did)
+
+    def _act_open(self):
+        rec, did = self._row_download(self._row_download_row_or_latest())
+        if not rec:
+            return
+        spath = rec.get("save_path") or ""
+        if os.path.exists(spath):
+            try:
+                os.startfile(spath)  # noqa: S606 (platform: Windows)
+            except Exception:
+                pass
+
+    def _row_download_row_or_latest(self):
+        # Butona basıldığında fare satırı değişmiş olabilir; en son görünen satırı kullan.
+        return self._hover_row
+
+    def _act_folder(self):
+        rec, did = self._row_download(self._hover_row)
+        if not rec:
+            return
+        spath = rec.get("save_path") or ""
+        try:
+            from core.paths import show_in_explorer
+            show_in_explorer(spath if os.path.exists(spath) else os.path.dirname(spath) or spath)
+        except Exception:
+            pass
+
+    def _update_hover_bar(self, row: int):
+        self._ensure_hover_bar()
+        rec, did = self._row_download(row)
+        if rec is None and did is None:
+            self._hover_bar.hide()
+            self._hover_row = -1
+            return
+        self._hover_row = row
+        # Toggle düğmesinin duruma uygun simgesi
+        status = rec.get("status")
+        if status == "Downloading":
+            self._btn_toggle.setText("⏸")
+            self._btn_toggle.setToolTip("Duraklat")
+        elif status in ("Paused", "Queued", "Error", "Retrying"):
+            self._btn_toggle.setText("▶")
+            self._btn_toggle.setToolTip("Devam Ettir")
+        else:
+            self._btn_toggle.setText("▶")
+            self._btn_toggle.setToolTip("Başlat")
+        # Tamamlanan indirmede aç klasik; diğerlerinde gizle
+        completed = status == "Completed" and os.path.exists(rec.get("save_path") or "")
+        self._btn_open.setVisible(completed)
+        self._btn_folder.setVisible(completed or status in ("Completed", "Cancelled"))
+        # Konum: satırın sağ üstü
+        row_y = self.rowViewportPosition(row)
+        col_w = max(0, self.columnWidth(self.columnCount() - 1))
+        w = self._hover_bar.sizeHint().width()
+        h = max(26, self.rowHeight(row) + 2)
+        vw = self.viewport().width()
+        x = vw - w - 12
+        self._hover_bar.setGeometry(max(0, x), max(0, row_y + (self.rowHeight(row) - h) // 2), w, h)
+        self._hover_bar.raise_()
+        self._hover_bar.show()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position().toPoint()
+        row = self.rowAt(pos.y())
+        if row >= 0 and (self._hover_bar is None or row != self._hover_row
+                         or not self._hover_bar.geometry().contains(self._hover_bar.mapFromGlobal(event.globalPosition().toPoint()))):
+            self._update_hover_bar(row)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        if self._hover_bar is not None:
+            self._hover_bar.hide()
+        self._hover_row = -1
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if self._hover_bar is not None and self._hover_bar.isVisible():
+            vp_pos = self._hover_bar.mapFromGlobal(event.globalPosition().toPoint())
+            if not self._hover_bar.geometry().contains(vp_pos):
+                self._hover_bar.hide()
+        super().mousePressEvent(event)
 
     def startDrag(self, supportedActions):
         selected_rows = set(item.row() for item in self.selectedItems())
@@ -759,7 +905,18 @@ class MainWindow(QMainWindow):
         self.shortcut_batch = QShortcut(QKeySequence("Ctrl+B"), self)
         self.shortcut_batch.activated.connect(lambda: self._show_batch_add_dialog())
 
-        right_layout.addWidget(self.table)
+        from ui.empty_state import EmptyStateWidget
+        self.table_stack = QStackedWidget()
+        self.table_stack.addWidget(self.table)
+
+        self.empty_state = EmptyStateWidget()
+        self.empty_state.add_clicked.connect(self._show_add_dialog)
+        self.empty_state.batch_clicked.connect(self._show_batch_add_dialog)
+        self.table_stack.addWidget(self.empty_state)
+
+        self.table_stack.setCurrentWidget(self.empty_state)  # boş listede başlat
+        self._sync_empty_state()
+        right_layout.addWidget(self.table_stack)
         splitter.addWidget(right_panel)
         splitter.setSizes([200, 800])
 
@@ -926,6 +1083,16 @@ class MainWindow(QMainWindow):
         self.sig_scheduler_tick.connect(self._handle_scheduler_tick)
         self.sig_scheduler_started.connect(self._handle_scheduler_started)
         self.sig_scheduler_stopped.connect(self._handle_scheduler_stopped)
+
+    def _sync_empty_state(self):
+        """Tablo boşken yönlendirme ekranını gösterir; ilk indirmenin eklenmesiyle tabloya döner."""
+        stack = getattr(self, "table_stack", None)
+        if stack is None:
+            return
+        empty = self.table.rowCount() == 0
+        stack.setCurrentWidget(self.empty_state if empty else self.table)
+        if empty and getattr(self, "speed_graph", None) is not None:
+            pass
 
     def _load_downloads_to_table(self):
         self.table.setRowCount(0)
@@ -1984,6 +2151,7 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "lbl_filter_count"):
             self.lbl_filter_count.setText(f"{visible_count} / {total_count}")
+        self._sync_empty_state()
 
     def _on_filter_chip_clicked(self, clicked_chip: str):
         for chip_id, btn in self.filter_btn_group.items():
