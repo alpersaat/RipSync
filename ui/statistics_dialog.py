@@ -18,8 +18,8 @@ class StatCard(QFrame):
         super().__init__(parent)
         self.setStyleSheet(f"""
             QFrame {{
-                background-color: #1f2335;
-                border: 1px solid #3b4261;
+                background-color: {T['bg_panel']};
+                border: 1px solid {T['border']};
                 border-radius: 8px;
                 padding: 10px;
             }}

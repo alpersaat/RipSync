@@ -156,7 +156,7 @@ class ClipboardNotificationPopup(QWidget):
         self.btn_ignore.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: #7a88cf;
+                color: {T['text_secondary']};
                 font-size: 11px;
                 padding: 6px 8px;
                 border: none;
