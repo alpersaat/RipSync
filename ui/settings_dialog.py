@@ -102,6 +102,23 @@ class SettingsDialog(QDialog):
         top_bar.addStretch()
         main_layout.addLayout(top_bar)
 
+        # Ayar arama: sekme başlığı + ayar etiketleri üzerinden filtreleme,
+        # eşleşen sekmeye otomatik geçiş.
+        self.edit_settings_search = QLineEdit()
+        self.edit_settings_search.setPlaceholderText("🔍 Ayar ara (örn: hız limiti, proxy, tema)...")
+        self.edit_settings_search.setClearButtonEnabled(True)
+        self.edit_settings_search.textChanged.connect(self._on_settings_search)
+        main_layout.addWidget(self.edit_settings_search)
+
+        # ==================================
+        # TEMEL GRUBU
+        # ==================================
+        self.lbl_group_basic = QLabel("🧱 TEMEL AYARLAR")
+        self.lbl_group_basic.setStyleSheet(
+            f"color: {T['text_secondary']}; font-size: 11px; font-weight: bold; padding: 2px 2px;"
+        )
+        main_layout.addWidget(self.lbl_group_basic)
+
         self.tabs = QTabWidget()
 
         # ==========================================
@@ -250,7 +267,9 @@ class SettingsDialog(QDialog):
         lbl_proxy_hint.setStyleSheet(f"color: {T['accent']}; font-size: 11px;")
         lay_proxy.addWidget(lbl_proxy_hint)
         lay_proxy.addStretch()
-        self.tabs.addTab(tab_proxy, "🌐 Ağ & Proxy")
+        if not hasattr(self, "tabs_adv"):
+            self.tabs_adv = QTabWidget()
+        self.tabs_adv.addTab(tab_proxy, "🌐 Ağ & Proxy")
 
         # ==========================================
         # TAB 3: Görünüm & Tema
@@ -493,6 +512,19 @@ class SettingsDialog(QDialog):
         lay_integ.addStretch()
         self.tabs.addTab(tab_integ, "🔗 Entegrasyon")
 
+        # ==================================
+        # GELİŞMİŞ GRUBU (arayüz modu "Gelişmiş" iken görünür)
+        # ==================================
+        self.lbl_group_advanced = QLabel("🧪 GELİŞMİŞ AYARLAR")
+        self.lbl_group_advanced.setStyleSheet(
+            f"color: {T['text_secondary']}; font-size: 11px; font-weight: bold; padding: 2px 2px;"
+        )
+        if not hasattr(self, "tabs_adv"):
+            self.tabs_adv = QTabWidget()
+        if not hasattr(self, "_adv_tab_labels"):
+            self._adv_tab_labels = []
+        self.tabs_adv.setWindowTitle("Gelişmiş")
+
         # ==========================================
         # TAB 6: Otomasyon & Webhook (Post-Download Actions)
         # ==========================================
@@ -581,7 +613,7 @@ class SettingsDialog(QDialog):
         lay_auto.addWidget(grp_hook)
 
         lay_auto.addStretch()
-        self.tabs.addTab(tab_auto, "🤖 Otomasyon & Webhook")
+        self.tabs_adv.addTab(tab_auto, "🤖 Otomasyon & Webhook")
 
         # ==========================================
         # TAB 7: 🌐 Site Kuralları (Domain Specific Folders)
@@ -618,9 +650,10 @@ class SettingsDialog(QDialog):
         sr_act_row.addStretch()
         lay_sr.addLayout(sr_act_row)
 
-        self.tabs.addTab(tab_site_rules, "🌐 Site Kuralları")
+        self.tabs_adv.addTab(tab_site_rules, "🌐 Site Kuralları")
 
         main_layout.addWidget(self.tabs)
+        main_layout.addWidget(self.tabs_adv)
 
         # Bottom Buttons
         btn_layout = QHBoxLayout()
@@ -638,17 +671,55 @@ class SettingsDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def _toggle_advanced_tabs(self, visible: bool):
-        # Sekme İndeksleri:
-        # 0: Genel & Dosyalar
-        # 1: Ağ & Proxy (Gelişmiş)
-        # 2: Görünüm & Tema
-        # 3: Hız & Güç
-        # 4: Entegrasyon
-        # 5: Otomasyon & Webhook (Gelişmiş)
-        # 6: Site Kuralları (Gelişmiş)
-        self.tabs.setTabVisible(1, visible)
-        self.tabs.setTabVisible(5, visible)
-        self.tabs.setTabVisible(6, visible)
+        """Gelişmiş ayar grubunu (Ağ & Proxy, Otomasyon, Site Kuralları) gösterir/gizler."""
+        visible = bool(visible)
+        lbl = getattr(self, "lbl_group_advanced", None)
+        if lbl is not None:
+            lbl.setVisible(visible)
+        adv_tabs = getattr(self, "tabs_adv", None)
+        if adv_tabs is not None:
+            adv_tabs.setVisible(visible)
+
+    def _on_settings_search(self, query: str):
+        """Ayar penceresi arama kutusu: eşleşen ilk sekmeye otomatik geçer.
+
+        Sekme başlığı + sayfadaki ayar etiketleri üzerinden eşleşme yapar.
+        """
+        q = (query or "").strip().lower()
+        if not q:
+            return
+        for tw_name in ("tabs", "tabs_adv"):
+            tw = getattr(self, tw_name, None)
+            if tw is None:
+                continue
+            for i in range(tw.count()):
+                if tw.isTabVisible(i) and self._page_matches_search(tw.widget(i), q):
+                    tw.setCurrentIndex(i)
+                    return
+            # Sekmebaşlığı eşleşmesi
+            for i in range(tw.count()):
+                if q in tw.tabText(i).lower():
+                    tw.setCurrentIndex(i)
+                    return
+
+    def _page_matches_search(self, page, q: str) -> bool:
+        from PyQt6.QtWidgets import QCheckBox as _QC, QPushButton as _QP
+        for fld in (QLineEdit, QComboBox, QLabel, _QC, _QP):
+            for w in page.findChildren(fld):
+                texts = []
+                if fld is QComboBox:
+                    texts.extend(w.itemText(k) for k in range(w.count()))
+                else:
+                    try:
+                        texts.append(w.text())
+                    except Exception:
+                        pass
+                if hasattr(w, "placeholderText"):
+                    texts.append(w.placeholderText())
+                for t in texts:
+                    if t and q in t.lower():
+                        return True
+        return False
 
     def _on_ui_mode_changed(self):
         mode = self.combo_ui_mode.currentData()

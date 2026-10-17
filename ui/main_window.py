@@ -235,10 +235,83 @@ class DownloadsTableWidget(QTableWidget):
             drag = QDrag(self)
             mime = QMimeData()
             mime.setUrls(urls)
+            ids = self._selected_download_ids()
+            if ids:
+                mime.setData("application/x-ripsync-download-ids", "\n".join(ids).encode("utf-8"))
             drag.setMimeData(mime)
             drag.exec(Qt.DropAction.CopyAction)
         else:
-            super().startDrag(supportedActions)
+            ids = self._selected_download_ids()
+            if ids:
+                drag = QDrag(self)
+                mime = QMimeData()
+                mime.setData("application/x-ripsync-download-ids", "\n".join(ids).encode("utf-8"))
+                drag.setMimeData(mime)
+                drag.exec(Qt.DropAction.MoveAction)
+            else:
+                super().startDrag(supportedActions)
+
+    def _selected_download_ids(self) -> list:
+        ids = []
+        for r in set(item.row() for item in self.selectedItems()):
+            item = self.item(r, 0)
+            if item:
+                did = item.data(Qt.ItemDataRole.UserRole)
+                if did and str(did) not in ("__ADD_QUEUE__",):
+                    ids.append(str(did))
+        return ids
+
+
+class CategoriesTreeWidget(QTreeWidget):
+    """Sol panel ağacı: tablo satırlarını kuyruğa sürükleyip bırakmayı destekler."""
+
+    MIME_IDS = "application/x-ripsync-download-ids"
+
+    def __init__(self, parent_window=None, parent=None):
+        super().__init__(parent)
+        self.parent_window = parent_window
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(self.MIME_IDS):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat(self.MIME_IDS):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _queue_id_at(self, event):
+        item = self.itemAt(event.position().toPoint())
+        if item is None:
+            return None
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, str):
+            if data.startswith("queue:"):
+                return data.split(":", 1)[1]
+            if self.root_queues_item is not None and item == self.root_queues_item:
+                return "default"
+        return None
+
+    def dropEvent(self, event):
+        if not event.mimeData().hasFormat(self.MIME_IDS) or self.parent_window is None:
+            event.ignore()
+            return
+        try:
+            ids = bytes(event.mimeData().data(self.MIME_IDS)).decode("utf-8").splitlines()
+            ids = [x for x in (s.strip() for s in ids) if x]
+        except Exception:
+            ids = []
+        qid = self._queue_id_at(event)
+        if ids and qid:
+            event.acceptProposedAction()
+            self.parent_window._move_downloads_to_queue(ids, qid)
+        else:
+            event.ignore()
 
 
 class MainWindow(QMainWindow):
@@ -740,7 +813,8 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(splitter)
 
         # Left: Categories Tree
-        self.tree_categories = QTreeWidget()
+        self.tree_categories = CategoriesTreeWidget(parent_window=self)
+        self.tree_categories.root_queues_item = None
         self.tree_categories.setHeaderHidden(True)
         self.tree_categories.setFixedWidth(200)
 
@@ -776,13 +850,17 @@ class MainWindow(QMainWindow):
         self.root_queues = QTreeWidgetItem(["🗂️ Kuyruklar"])
         self.root_queues.setData(0, Qt.ItemDataRole.UserRole, "__QUEUES_ROOT__")
         self.tree_categories.addTopLevelItem(self.root_queues)
+        self.tree_categories.root_queues_item = self.root_queues
         self.root_queues.setExpanded(True)
         self._refresh_queues_tree()
+        self._restore_tree_state()
 
         self.tree_categories.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree_categories.customContextMenuRequested.connect(self._show_categories_tree_context_menu)
 
         self.tree_categories.currentItemChanged.connect(self._on_category_changed)
+        self.tree_categories.itemExpanded.connect(self._persist_tree_state)
+        self.tree_categories.itemCollapsed.connect(self._persist_tree_state)
         splitter.addWidget(self.tree_categories)
 
         # Right: Container with Live Search & Filter Bar + Downloads Table
@@ -904,6 +982,14 @@ class MainWindow(QMainWindow):
 
         self.shortcut_batch = QShortcut(QKeySequence("Ctrl+B"), self)
         self.shortcut_batch.activated.connect(lambda: self._show_batch_add_dialog())
+
+        # Komut Paleti (Ctrl+K) — eylemleri tek yerden arayıp çalıştır
+        self.shortcut_palette = QShortcut(QKeySequence("Ctrl+K"), self)
+        self.shortcut_palette.activated.connect(self._show_command_palette)
+
+        # Kısayol Dökümü (F1)
+        self.shortcut_help_shortcuts = QShortcut(QKeySequence("F1"), self)
+        self.shortcut_help_shortcuts.activated.connect(self._show_shortcuts_dialog)
 
         from ui.empty_state import EmptyStateWidget
         self.table_stack = QStackedWidget()
@@ -1049,6 +1135,101 @@ class MainWindow(QMainWindow):
         else:
             act.setText("▶ Başlat")
             act.setToolTip("Seçili indirmeleri başlatır")
+
+    def _persist_tree_state(self, item=None):
+        """Sol panel başlıklarının (Kategori/Etiketler/Kuyruklar) açık-kapalı durumunu kalıcı saklar."""
+        try:
+            state = self.db.get_setting("sidebar_tree_expanded", {})
+            if not isinstance(state, dict):
+                state = {}
+            key = getattr(self, "root_all", None)
+            for name, root in (("all", self.root_all), ("tags", self.root_tags), ("queues", self.root_queues)):
+                if root is not None:
+                    state[name] = root.isExpanded()
+            self.db.set_setting("sidebar_tree_expanded", state)
+        except Exception:
+            pass
+
+    def _restore_tree_state(self):
+        try:
+            state = self.db.get_setting("sidebar_tree_expanded", {})
+            if not isinstance(state, dict):
+                return
+            mapping = (("all", self.root_all), ("tags", self.root_tags), ("queues", self.root_queues))
+            for name, root in mapping:
+                if root is not None and name in state:
+                    root.setExpanded(bool(state.get(name)))
+        except Exception:
+            pass
+
+    def _show_command_palette(self):
+        """Ctrl+K komut paletini açar: tüm eylemler aramayla tek yerden."""
+        from ui.command_palette import CommandPaletteDialog
+        commands = []
+        toolbar_actions = [
+            ("▶/⏸ Başlat / Duraklat (Seçili)", lambda: self._on_toggle_run_triggered()),
+            ("🗑 Sil (Seçili)", self._delete_selected),
+            ("➕ URL Ekle", self._show_add_dialog),
+            ("⚙ Ayarlar", self._show_settings_dialog),
+            ("📑 Oynatma Listesi İndir", lambda: self._show_playlist_dialog()),
+            ("📋 Toplu Link Ekle", lambda: self._show_batch_add_dialog()),
+            ("⚡ Kuyruğu Başlat", self._on_start_all),
+            ("⏸ Tümünü Durdur", self._on_pause_all),
+            ("⏱ Zamanlayıcı", self._show_scheduler_dialog),
+            ("📊 İstatistikler", self._show_statistics_dialog),
+            ("🧹 Eksik Dosyaları Temizle", self._clean_missing_files),
+            ("📂 Dosyayı Aç", self._open_selected_file),
+            ("📁 Klasörde Göster", self._open_selected_folder),
+            ("🌐 Eklenti Kılavuzu", self._show_extension_guide),
+            ("💥 Dosyayla Sil", self._delete_selected_with_files),
+            ("⏹ Seçilenleri İptal Et", self._cancel_selected),
+            ("🧙 Kurulum Sihirbazı", self._show_setup_wizard),
+            ("🚀 Onboarding Turu", self._show_onboarding_dialog),
+        ]
+        for label, cb in toolbar_actions:
+            commands.append((label, cb, "Eylemler"))
+        # Mod geçişleri + filtre kategorileri
+        commands.append(("Arayüz Modu: Basit ⟷ Gelişmiş Geçiş", self._toggle_ui_mode, "Görünüm"))
+        for cat_key, cat_label in (("All", "Kategori: Tüm İndirmeler"), ("Completed", "Kategori: Tamamlananlar"),
+                                    ("Downloading", "Kategori: Devam Edenler"), ("Video", "Kategori: Videolar"),
+                                    ("Music", "Kategori: Müzik")):
+            commands.append((cat_label, lambda key=cat_key: self._on_category_changed(None, self._category_item_for(key)), "Görünüm"))
+        # Basit mod / arama odak
+        commands.append(("Aramaya Odaklan (Ctrl+F)", self.edit_search.setFocus, "Görünüm"))
+        dlg = CommandPaletteDialog(self)
+        self._apply_palette_dark = True
+        dlg.open_with(commands)
+
+    def _category_item_for(self, key: str):
+        """Kategori anahtarına uygun ItemsItem döndürür (komut paleti için)."""
+        it = self.tree_categories.topLevelItem(0)
+        if it is not None and it.data(0, Qt.ItemDataRole.UserRole) == "All":
+            for i in range(it.childCount()):
+                ch = it.child(i)
+                if ch.data(0, Qt.ItemDataRole.UserRole) == key:
+                    return ch
+        return it
+
+    def _show_shortcuts_dialog(self):
+        """F1: mevcut kısayolların okunur dökümü."""
+        rows = [
+            ("Ctrl+N", "Yeni URL Ekle"),
+            ("Ctrl+B", "Toplu Link Ekle"),
+            ("Ctrl+F", "Aramaya Odaklan"),
+            ("Ctrl+K", "Komut Paleti"),
+            ("Ctrl+P", "Ayarlar"),
+            ("Delete", "Seçileni Listeden Kaldır"),
+            ("Shift+Delete", "Seçileni Dosyasıyla Sil"),
+            ("Ctrl+Up / Ctrl+Down", "Kuyruğunda yukarı/aşağı taşı"),
+            ("Esc", "Aramayı Temizle"),
+            ("F1", "Bu kısayol listesi"),
+        ]
+        lines = "\n".join([f"<tr><td style='padding:4px 14px 4px 0;'><b>{k}</b></td><td style='padding:4px 0;'>{v}</td></tr>" for k, v in rows])
+        QMessageBox.information(
+            self,
+            "Kısayollar (F1)",
+            f"<table>{lines}</table>"
+        )
 
     def _init_signals(self):        # Connect queue manager thread-safe callbacks to PyQt signals
         self.queue_mgr.on_task_progress = lambda did, d, t, s, e: self.sig_progress_update.emit(did, d, t, s, e)

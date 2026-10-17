@@ -138,22 +138,19 @@ def test_settings_dialog_ui_mode_and_tabs(qapp, test_db):
     test_db.save_ui_mode("simple")
     dlg = SettingsDialog(test_db)
 
-    # Basit moddayken Proxy (1), Otomasyon (5) ve Site Kuralları (6) gizli olmalı
+    # Basit moddayken Proxy, Otomasyon ve Site Kuralları gizli olmalı (gelişmiş grup)
     assert dlg.combo_ui_mode.currentData() == "simple"
     assert dlg.chk_show_advanced_tabs.isChecked() is False
-    assert dlg.tabs.isTabVisible(1) is False
-    assert dlg.tabs.isTabVisible(5) is False
-    assert dlg.tabs.isTabVisible(6) is False
+    assert dlg.tabs_adv.isHidden() is True
+    assert dlg.lbl_group_advanced.isHidden() is True
     # Temel sekmeler açık olmalı
-    assert dlg.tabs.isTabVisible(0) is True  # Genel
-    assert dlg.tabs.isTabVisible(2) is True  # Görünüm
+    assert dlg.tabs.count() == 4  # Genel, Görünüm, Hız & Güç, Entegrasyon
 
     # Gelişmiş modu seç
     dlg.combo_ui_mode.setCurrentIndex(dlg.combo_ui_mode.findData("advanced"))
     assert dlg.chk_show_advanced_tabs.isChecked() is True
-    assert dlg.tabs.isTabVisible(1) is True
-    assert dlg.tabs.isTabVisible(5) is True
-    assert dlg.tabs.isTabVisible(6) is True
+    assert dlg.tabs_adv.isHidden() is False
+    assert dlg.tabs_adv.count() == 3  # Ağ & Proxy, Otomasyon, Site Kuralları
 
     # Ayarları kaydet
     dlg._save_settings()
