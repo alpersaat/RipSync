@@ -57,28 +57,21 @@ def test_main_window_simple_and_advanced_mode(qapp, test_db, queue_mgr):
     assert win.ui_mode == "simple"
     assert test_db.get_ui_mode() == "simple"
 
-    # Gelişmiş araç çubuğu öğeleri gizli olmalı
-    assert win.act_playlist.isVisible() is False
-    assert win.act_batch_add.isVisible() is False
-    assert win.act_start_queue.isVisible() is False
-    assert win.act_pause_all.isVisible() is False
-    assert win.act_scheduler.isVisible() is False
-    assert win.act_statistics.isVisible() is False
-    assert win.act_clean_missing.isVisible() is False
-    assert win.act_extension_widget.isVisible() is False
-    assert win.act_conc_widget.isVisible() is False
-    assert win.act_sched_widget.isVisible() is False
-    assert win.act_limiter_widget.isVisible() is False
-    assert win.act_queue_widget.isVisible() is False
+    # Gelişmiş araçlar ikincildir: araç çubuğu sade kalır, tümü "Daha Fazla"
+    # menüsünde erişilebilir kalır; sürekli ayar şeridi gizlidir.
+    more_labels = [a.text() for a in win.menu_more.actions()]
+    for expected in (win.act_playlist, win.act_batch_add, win.act_start_queue,
+                     win.act_pause_all, win.act_scheduler, win.act_statistics,
+                     win.act_clean_missing, win.act_open_file, win.act_open_folder,
+                     win.act_extension, win.act_delete_file):
+        assert expected.text() in more_labels
+
+    assert win.quick_bar.isHidden() is True
 
     # Temel indirme butonları görünür olmalı
     assert win.act_add.isVisible() is True
-    assert win.act_start.isVisible() is True
-    assert win.act_pause.isVisible() is True
-    assert win.act_stop.isVisible() is True
+    assert win.act_toggle_run.isVisible() is True
     assert win.act_delete.isVisible() is True
-    assert win.act_open_file.isVisible() is True
-    assert win.act_open_folder.isVisible() is True
     assert win.act_settings.isVisible() is True
 
     # Kategori ağacında Etiketler ve Kuyruklar gizli olmalı
@@ -93,16 +86,11 @@ def test_main_window_simple_and_advanced_mode(qapp, test_db, queue_mgr):
     assert win.lbl_filter_count.isHidden() is True
     assert win.edit_search.isHidden() is False
 
-    # Durum çubuğunda sparkline grafik ve detaylar gizli olmalı
-    assert win.speed_graph.isHidden() is True
-    assert win.lbl_ext_status.isHidden() is True
-    assert win.lbl_limiter_stat.isHidden() is True
-    assert win.lbl_scheduler_stat.isHidden() is True
+    # Durum çubuğu sade: hız istatistiği görünür, detaylar durum panelindedir
     assert win.lbl_speed_stat.isHidden() is False
-    assert win.lbl_disk_stat.isHidden() is False
+    assert getattr(win, "btn_metered_stat") is not None
 
-
-    # Tabloda 'Eklenme Tarihi' (6. sütun) gizli olmalı
+    # Tabloda 'Eklenme Tarihi' (7. sütun) gizli olmalı
     assert win.table.isColumnHidden(6) is True
 
     # Buton metni basit mod göstermeli
@@ -113,19 +101,8 @@ def test_main_window_simple_and_advanced_mode(qapp, test_db, queue_mgr):
     assert win.ui_mode == "advanced"
     assert test_db.get_ui_mode() == "advanced"
 
-    # Gelişmiş araç çubuğu öğeleri görünür olmalı
-    assert win.act_playlist.isVisible() is True
-    assert win.act_batch_add.isVisible() is True
-    assert win.act_start_queue.isVisible() is True
-    assert win.act_pause_all.isVisible() is True
-    assert win.act_scheduler.isVisible() is True
-    assert win.act_statistics.isVisible() is True
-    assert win.act_clean_missing.isVisible() is True
-    assert win.act_extension_widget.isVisible() is True
-    assert win.act_conc_widget.isVisible() is True
-    assert win.act_sched_widget.isVisible() is True
-    assert win.act_limiter_widget.isVisible() is True
-    assert win.act_queue_widget.isVisible() is True
+    # Sürekli ayar şeridi görünür olmalı
+    assert win.quick_bar.isHidden() is False
 
     # Kategori ağacında Etiketler ve Kuyruklar görünür olmalı
     assert win.root_tags.isHidden() is False
@@ -138,11 +115,8 @@ def test_main_window_simple_and_advanced_mode(qapp, test_db, queue_mgr):
     assert win.combo_date_filter.isHidden() is False
     assert win.lbl_filter_count.isHidden() is False
 
-    # Durum çubuğu öğeleri görünür olmalı
-    assert win.speed_graph.isHidden() is False
-    assert win.lbl_ext_status.isHidden() is False
-    assert win.lbl_limiter_stat.isHidden() is False
-    assert win.lbl_scheduler_stat.isHidden() is False
+    # Durum çubuğu öğeleri: hız istatistiği görünür kalır
+    assert win.lbl_speed_stat.isHidden() is False
 
     # Tablo 6. sütun açık olmalı
     assert win.table.isColumnHidden(6) is False
