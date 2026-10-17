@@ -798,6 +798,7 @@ class MainWindow(QMainWindow):
         quick_bar_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         quick_layout.addWidget(quick_bar_spacer)
         self.quick_bar.setProperty("objectName", "quick_settings_bar")
+        self._apply_toolbar_icons()
 
 
 
@@ -1086,6 +1087,33 @@ class MainWindow(QMainWindow):
         st = self.scheduler.get_status()
         self._sync_scheduler_toolbar_ui(st)
 
+    def _apply_toolbar_icons(self):
+        """Araç çubuğuna tema renkli SVG ikonlarını uygular (tema değişince yeniden çağrılır)."""
+        try:
+            from ui.icons import apply_theme_icons, ICON_SIZE
+        except Exception:
+            return
+        toolbar = getattr(self, "toolbar", None)
+        if toolbar is not None:
+            toolbar.setIconSize(ICON_SIZE)
+        icons = apply_theme_icons()
+        self._icon_pack = icons
+        act_add = getattr(self, "act_add", None)
+        if act_add is not None:
+            act_add.setIcon(icons["plus"])
+        act_run = getattr(self, "act_toggle_run", None)
+        if act_run is not None:
+            act_run.setIcon(icons["play"])
+        act_del = getattr(self, "act_delete", None)
+        if act_del is not None:
+            act_del.setIcon(icons["trash"])
+        act_set = getattr(self, "act_settings", None)
+        if act_set is not None:
+            act_set.setIcon(icons["settings"])
+        btn_more = getattr(self, "btn_more", None)
+        if btn_more is not None:
+            btn_more.setIcon(icons["more"])
+
     def _refresh_status_panel(self):
         """⚡ Durum panelini açılmadan günceller (disk, limit, zamanlayıcı, köprü)."""
         self.act_status_disk.setText(getattr(self, "lbl_disk_stat", None) and self.lbl_disk_stat.text() or "💾 Disk: Bilinmiyor")
@@ -1128,13 +1156,21 @@ class MainWindow(QMainWindow):
         if not rows:
             act.setText("▶ Başlat")
             act.setToolTip("Seçili indirmeleri başlatır")
+            icons = getattr(self, "_icon_pack", {})
+            if icons:
+                act.setIcon(icons["play"])
             return
+        icons = getattr(self, "_icon_pack", {})
         if any(self._row_is_running(r) for r in rows):
             act.setText("⏸ Duraklat")
             act.setToolTip("Seçili çalışan indirmeleri duraklatır")
+            if icons:
+                act.setIcon(icons["pause"])
         else:
             act.setText("▶ Başlat")
             act.setToolTip("Seçili indirmeleri başlatır")
+            if icons:
+                act.setIcon(icons["play"])
 
     def _persist_tree_state(self, item=None):
         """Sol panel başlıklarının (Kategori/Etiketler/Kuyruklar) açık-kapalı durumunu kalıcı saklar."""
@@ -2535,6 +2571,7 @@ class MainWindow(QMainWindow):
                 app.setStyleSheet(sheet)
             else:
                 self.setStyleSheet(sheet)
+            self._apply_toolbar_icons()
 
             # Apply UI mode if modified in settings
             self.apply_ui_mode(self.db.get_ui_mode())
