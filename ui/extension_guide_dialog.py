@@ -23,6 +23,7 @@ from core.extension_installer import (
     get_extension_folder_path
 )
 from ui.tray_icon import create_default_icon
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 
 class BrowserMockupCard(QFrame):
@@ -33,13 +34,13 @@ class BrowserMockupCard(QFrame):
     def __init__(self, step_number: int, title: str, subtitle: str, mockup_type: str, parent=None):
         super().__init__(parent)
         self.setObjectName("mockupCard")
-        self.setStyleSheet("""
-            QFrame#mockupCard {
-                background-color: #1a1b26;
-                border: 2px solid #292e42;
+        self.setStyleSheet(f"""
+            QFrame#mockupCard {{
+                background-color: {T['bg_main']};
+                border: 2px solid {T['bg_hover']};
                 border-radius: 10px;
                 padding: 12px;
-            }
+            }}
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -50,9 +51,9 @@ class BrowserMockupCard(QFrame):
         header_layout.setSpacing(10)
 
         badge = QLabel(f" {step_number} ")
-        badge.setStyleSheet("""
-            background-color: #7aa2f7;
-            color: #15161e;
+        badge.setStyleSheet(f"""
+            background-color: {T['accent']};
+            color: {T['code_bg']};
             font-weight: bold;
             font-size: 13px;
             border-radius: 12px;
@@ -63,14 +64,14 @@ class BrowserMockupCard(QFrame):
         header_layout.addWidget(badge)
 
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #7aa2f7;")
+        title_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {T['accent']};")
         header_layout.addWidget(title_lbl, 1)
 
         layout.addLayout(header_layout)
 
         desc_lbl = QLabel(subtitle)
         desc_lbl.setWordWrap(True)
-        desc_lbl.setStyleSheet("color: #a9b1d6; font-size: 12px; margin-bottom: 4px;")
+        desc_lbl.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px; margin-bottom: 4px;")
         layout.addWidget(desc_lbl)
 
         # Visual Illustration Mockup Box
@@ -79,9 +80,9 @@ class BrowserMockupCard(QFrame):
 
     def _create_mockup(self, mockup_type: str) -> QWidget:
         container = QFrame()
-        container.setStyleSheet("""
-            background-color: #16161e;
-            border: 1px solid #3b4261;
+        container.setStyleSheet(f"""
+            background-color: {T['code_bg']};
+            border: 1px solid {T['border']};
             border-radius: 8px;
             padding: 8px;
         """)
@@ -92,15 +93,15 @@ class BrowserMockupCard(QFrame):
         # Fake browser titlebar / tab
         top_bar = QHBoxLayout()
         top_bar.setSpacing(6)
-        for col in ["#f7768e", "#e0af68", "#9ece6a"]:
+        for col in [T['danger'], T['warning'], T['success']]:
             dot = QLabel("●")
             dot.setStyleSheet(f"color: {col}; font-size: 11px;")
             top_bar.addWidget(dot)
 
         url_bar = QLabel(" chrome://extensions ")
-        url_bar.setStyleSheet("""
-            background-color: #1f2335;
-            color: #7aa2f7;
+        url_bar.setStyleSheet(f"""
+            background-color: {T['bg_panel']};
+            color: {T['accent']};
             border-radius: 4px;
             padding: 2px 8px;
             font-family: Consolas, monospace;
@@ -113,7 +114,7 @@ class BrowserMockupCard(QFrame):
         if mockup_type == "open_browser":
             row = QHBoxLayout()
             info = QLabel("🌐 <b>Adres Çubuğu:</b> <code>chrome://extensions</code> veya <code>edge://extensions</code>")
-            info.setStyleSheet("color: #c0caf5; font-size: 11px;")
+            info.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px;")
             row.addWidget(info)
             c_layout.addLayout(row)
 
@@ -121,18 +122,18 @@ class BrowserMockupCard(QFrame):
             row = QHBoxLayout()
             row.addStretch()
             lbl = QLabel("Geliştirici modu (Developer mode)")
-            lbl.setStyleSheet("color: #c0caf5; font-size: 12px; font-weight: bold;")
+            lbl.setStyleSheet(f"color: {T['text_primary']}; font-size: 12px; font-weight: bold;")
             toggle = QLabel(" [ AÇIK 🔵 ] ")
-            toggle.setStyleSheet("""
-                background-color: #2ac3de;
-                color: #15161e;
+            toggle.setStyleSheet(f"""
+                background-color: {T['color_sky']};
+                color: {T['code_bg']};
                 font-weight: bold;
                 border-radius: 10px;
                 padding: 4px 10px;
                 font-size: 11px;
             """)
             arrow = QLabel("👈 <b>1. Bunu Açın</b>")
-            arrow.setStyleSheet("color: #e0af68; font-weight: bold;")
+            arrow.setStyleSheet(f"color: {T['warning']}; font-weight: bold;")
             row.addWidget(lbl)
             row.addWidget(toggle)
             row.addWidget(arrow)
@@ -141,16 +142,16 @@ class BrowserMockupCard(QFrame):
         elif mockup_type == "load_unpacked":
             row = QHBoxLayout()
             btn_fake = QLabel(" 📥 Paketlenmemiş öğe yükle ")
-            btn_fake.setStyleSheet("""
-                background-color: #7aa2f7;
-                color: #15161e;
+            btn_fake.setStyleSheet(f"""
+                background-color: {T['accent']};
+                color: {T['code_bg']};
                 font-weight: bold;
                 border-radius: 6px;
                 padding: 6px 14px;
                 font-size: 12px;
             """)
             arrow = QLabel("👈 <b>2. Bu Butona Tıklayın</b>")
-            arrow.setStyleSheet("color: #9ece6a; font-weight: bold; font-size: 12px;")
+            arrow.setStyleSheet(f"color: {T['success']}; font-weight: bold; font-size: 12px;")
             row.addWidget(btn_fake)
             row.addWidget(arrow)
             row.addStretch()
@@ -159,11 +160,11 @@ class BrowserMockupCard(QFrame):
         elif mockup_type == "select_folder":
             row = QVBoxLayout()
             f_box = QLabel("🗂 <b>Açılan pencerede RipSync 'extension' klasörünü seçin:</b><br>"
-                           f"<span style='color: #7dcfff; font-family: Consolas;'>{get_extension_folder_path()}</span>")
-            f_box.setStyleSheet("""
-                background-color: #1f2335;
-                color: #c0caf5;
-                border: 1px dashed #7aa2f7;
+                           f"<span style='color: {T['color_cyan']}; font-family: Consolas;'>{get_extension_folder_path()}</span>")
+            f_box.setStyleSheet(f"""
+                background-color: {T['bg_panel']};
+                color: {T['text_primary']};
+                border: 1px dashed {T['accent']};
                 border-radius: 6px;
                 padding: 8px;
                 font-size: 11px;
@@ -172,7 +173,7 @@ class BrowserMockupCard(QFrame):
             row.addWidget(f_box)
 
             tip = QLabel("💡 <i>İpucu: 'Yolu Kopyala' butonuna bastıktan sonra pencerede 'Klasör:' kutusuna Ctrl+V yapıp Klasörü Seç'e basabilirsiniz!</i>")
-            tip.setStyleSheet("color: #e0af68; font-size: 11px;")
+            tip.setStyleSheet(f"color: {T['warning']}; font-size: 11px;")
             tip.setWordWrap(True)
             row.addWidget(tip)
 
@@ -198,64 +199,64 @@ class ExtensionGuideDialog(QDialog):
         self.setWindowTitle("RipSync - Tarayıcı Eklentisi Kurulum Kılavuzu")
         self.setWindowIcon(create_default_icon())
         self.setMinimumSize(680, 620)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1a1b26;
-                color: #c0caf5;
-            }
-            QLabel {
-                color: #c0caf5;
-            }
-            QPushButton {
-                background-color: #24283b;
-                color: #c0caf5;
-                border: 1px solid #414868;
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {T['bg_main']};
+                color: {T['text_primary']};
+            }}
+            QLabel {{
+                color: {T['text_primary']};
+            }}
+            QPushButton {{
+                background-color: {T['bg_card']};
+                color: {T['text_primary']};
+                border: 1px solid {T['border']};
                 border-radius: 6px;
                 padding: 8px 14px;
                 font-weight: bold;
                 font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #3b4261;
-                border-color: #7aa2f7;
-            }
-            QPushButton#primaryBtn {
-                background-color: #3d59a1;
-                color: #ffffff;
-                border: 1px solid #7aa2f7;
-            }
-            QPushButton#primaryBtn:hover {
-                background-color: #7aa2f7;
-                color: #15161e;
-            }
-            QPushButton#successBtn {
-                background-color: #1b4d3e;
-                color: #9ece6a;
-                border: 1px solid #9ece6a;
-            }
-            QPushButton#successBtn:hover {
-                background-color: #9ece6a;
-                color: #15161e;
-            }
-            QTabWidget::pane {
-                border: 1px solid #292e42;
-                background-color: #1f2335;
+            }}
+            QPushButton:hover {{
+                background-color: {T['border']};
+                border-color: {T['accent']};
+            }}
+            QPushButton#primaryBtn {{
+                background-color: {T['accent_primary']};
+                color: {T['text_on_accent']};
+                border: 1px solid {T['accent']};
+            }}
+            QPushButton#primaryBtn:hover {{
+                background-color: {T['accent']};
+                color: {T['code_bg']};
+            }}
+            QPushButton#successBtn {{
+                background-color: {T['success_bg']};
+                color: {T['success']};
+                border: 1px solid {T['success']};
+            }}
+            QPushButton#successBtn:hover {{
+                background-color: {T['success']};
+                color: {T['code_bg']};
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {T['bg_hover']};
+                background-color: {T['bg_panel']};
                 border-radius: 8px;
-            }
-            QTabBar::tab {
-                background: #16161e;
-                color: #7aa2f7;
+            }}
+            QTabBar::tab {{
+                background: {T['code_bg']};
+                color: {T['accent']};
                 padding: 8px 16px;
                 margin-right: 4px;
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
                 font-weight: bold;
-            }
-            QTabBar::tab:selected {
-                background: #1f2335;
-                color: #ffffff;
-                border-bottom: 2px solid #7aa2f7;
-            }
+            }}
+            QTabBar::tab:selected {{
+                background: {T['bg_panel']};
+                color: {T['text_on_accent']};
+                border-bottom: 2px solid {T['accent']};
+            }}
         """)
 
         self._init_ui()
@@ -272,11 +273,11 @@ class ExtensionGuideDialog(QDialog):
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
-        title.setStyleSheet("color: #7aa2f7;")
+        title.setStyleSheet(f"color: {T['accent']};")
         header_row.addWidget(title)
 
         status_badge = QLabel(f"● Köprü Hazır (Port: {self.bridge_port})")
-        status_badge.setStyleSheet("color: #9ece6a; font-weight: bold; font-size: 11px;")
+        status_badge.setStyleSheet(f"color: {T['success']}; font-weight: bold; font-size: 11px;")
         header_row.addStretch()
         header_row.addWidget(status_badge)
         layout.addLayout(header_row)
@@ -286,14 +287,14 @@ class ExtensionGuideDialog(QDialog):
             "Aşağıdaki hızlı seçeneklerle veya 4 adımlı görsel rehberle eklentiyi 10 saniyede kurabilirsiniz:"
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #9aa5ce; font-size: 12px;")
+        intro.setStyleSheet(f"color: {T['text_secondary']}; font-size: 12px;")
         layout.addWidget(intro)
 
         # Quick Actions Bar (Tek Tıkla Eylemler)
         actions_frame = QFrame()
-        actions_frame.setStyleSheet("""
-            background-color: #1f2335;
-            border: 1px solid #3b4261;
+        actions_frame.setStyleSheet(f"""
+            background-color: {T['bg_panel']};
+            border: 1px solid {T['border']};
             border-radius: 8px;
             padding: 10px;
         """)
@@ -302,7 +303,7 @@ class ExtensionGuideDialog(QDialog):
         act_layout.setSpacing(8)
 
         act_title = QLabel("⚡ <b>Hızlı Seçenekler (Orta & İleri Seviye Kullanıcılar İçin)</b>")
-        act_title.setStyleSheet("color: #e0af68; font-size: 12px;")
+        act_title.setStyleSheet(f"color: {T['warning']}; font-size: 12px;")
         act_layout.addWidget(act_title)
 
         btn_row = QHBoxLayout()
@@ -378,7 +379,7 @@ class ExtensionGuideDialog(QDialog):
         # Step navigation controls
         nav_layout = QHBoxLayout()
         self.lbl_step_indicator = QLabel("Adım 1 / 4")
-        self.lbl_step_indicator.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.lbl_step_indicator.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         nav_layout.addWidget(self.lbl_step_indicator)
         nav_layout.addStretch()
 
@@ -404,9 +405,9 @@ class ExtensionGuideDialog(QDialog):
         # Security Token Info
         if self.bridge_token:
             token_frame = QFrame()
-            token_frame.setStyleSheet("""
-                background-color: #16161e;
-                border: 1px solid #292e42;
+            token_frame.setStyleSheet(f"""
+                background-color: {T['code_bg']};
+                border: 1px solid {T['bg_hover']};
                 border-radius: 6px;
                 padding: 6px 12px;
             """)
@@ -414,8 +415,8 @@ class ExtensionGuideDialog(QDialog):
             tf_layout.setContentsMargins(8, 4, 8, 4)
 
             token_display = f"{self.bridge_token[:6]}...{self.bridge_token[-6:]}" if len(self.bridge_token) > 16 else self.bridge_token
-            lbl_tok = QLabel(f"🔒 <b>Köprü Token:</b> <code style='color:#7aa2f7;'>{token_display}</code> "
-                            "<span style='color:#9ece6a;'>(config.json ile otomatik eşleşmiştir)</span>")
+            lbl_tok = QLabel(f"🔒 <b>Köprü Token:</b> <code style='color:{T['accent']};'>{token_display}</code> "
+                            f"<span style='color:{T['success']};'>(config.json ile otomatik eşleşmiştir)</span>")
             lbl_tok.setTextFormat(Qt.TextFormat.RichText)
             tf_layout.addWidget(lbl_tok, 1)
 

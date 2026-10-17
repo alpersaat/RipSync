@@ -13,6 +13,7 @@ from PyQt6.QtGui import QPixmap, QIcon
 
 from core.database import detect_category, get_category_folder
 from core.playlist_parser import is_youtube_playlist_url, normalize_playlist_url, fetch_playlist_metadata
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 
@@ -93,7 +94,7 @@ class PlaylistDownloadDialog(QDialog):
         # 1. URL Bar & Scan Button
         url_box = QHBoxLayout()
         lbl_url = QLabel("Çalma Listesi Bağlantısı:")
-        lbl_url.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_url.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.edit_url = QLineEdit()
         self.edit_url.setPlaceholderText("https://www.youtube.com/playlist?list=...")
         self.edit_url.returnPressed.connect(self._start_scan)
@@ -117,23 +118,23 @@ class PlaylistDownloadDialog(QDialog):
 
         # 2. Playlist Info Header & Statistics Card
         self.info_card = QFrame()
-        self.info_card.setStyleSheet("""
-            QFrame {
-                background-color: #24283b;
-                border: 1px solid #414868;
+        self.info_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {T['bg_card']};
+                border: 1px solid {T['border']};
                 border-radius: 8px;
                 padding: 6px 12px;
-            }
+            }}
         """)
         info_layout = QHBoxLayout(self.info_card)
         info_layout.setContentsMargins(10, 8, 10, 8)
 
         self.lbl_playlist_title = QLabel("Henüz bir çalma listesi taranmadı.")
-        self.lbl_playlist_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #c0caf5;")
+        self.lbl_playlist_title.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {T['text_primary']};")
         self.lbl_playlist_title.setWordWrap(True)
 
         self.lbl_stats = QLabel("Toplam: 0 Video | Seçilen: 0 Video")
-        self.lbl_stats.setStyleSheet("font-weight: bold; color: #9ece6a; font-size: 12px;")
+        self.lbl_stats.setStyleSheet(f"font-weight: bold; color: {T['success']}; font-size: 12px;")
         self.lbl_stats.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         info_layout.addWidget(self.lbl_playlist_title, 1)
@@ -162,7 +163,7 @@ class PlaylistDownloadDialog(QDialog):
         sel_bar.addSpacing(16)
 
         lbl_filter = QLabel("Filtrele:")
-        lbl_filter.setStyleSheet("color: #7aa2f7;")
+        lbl_filter.setStyleSheet(f"color: {T['accent']};")
         sel_bar.addWidget(lbl_filter)
 
         self.edit_filter = QLineEdit()
@@ -200,7 +201,7 @@ class PlaylistDownloadDialog(QDialog):
         opts_box.setSpacing(12)
 
         lbl_q = QLabel("İndirme Kalitesi / Format:")
-        lbl_q.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_q.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         opts_box.addWidget(lbl_q)
 
         self.combo_quality = QComboBox()
@@ -219,7 +220,7 @@ class PlaylistDownloadDialog(QDialog):
         opts_box.addSpacing(10)
 
         lbl_dir = QLabel("Kayıt Klasörü:")
-        lbl_dir.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_dir.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         opts_box.addWidget(lbl_dir)
 
         # Target folder inside Downloads/Videolar or Downloads/Müzik
@@ -239,7 +240,7 @@ class PlaylistDownloadDialog(QDialog):
         prefix_box = QHBoxLayout()
         self.chk_prefix_index = QCheckBox("Dosya adının başına sıra numarası ekle (Örn: '01 - Video Başlığı.mp4')")
         self.chk_prefix_index.setChecked(True)
-        self.chk_prefix_index.setStyleSheet("color: #a9b1d6; font-weight: bold;")
+        self.chk_prefix_index.setStyleSheet(f"color: {T['text_muted']}; font-weight: bold;")
         prefix_box.addWidget(self.chk_prefix_index)
         prefix_box.addStretch()
         main_layout.addLayout(prefix_box)
@@ -249,18 +250,18 @@ class PlaylistDownloadDialog(QDialog):
         btn_box.setSpacing(10)
 
         self.btn_download_now = QPushButton("🚀 Seçilenleri Hemen Sırayla İndir")
-        self.btn_download_now.setStyleSheet("""
-            QPushButton {
-                background-color: #7aa2f7;
-                color: #1a1b26;
+        self.btn_download_now.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['accent']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 font-size: 13px;
                 padding: 10px 22px;
                 border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #89b4fa;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['color_blue']};
+            }}
         """)
         self.btn_download_now.clicked.connect(lambda: self._submit(start_now=True))
         self.btn_download_now.setEnabled(False)

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QFormLayout, QGroupBox, QMessageBox, QFrame
 )
-from ui.styles import format_progress_size
+from ui.styles import format_progress_size, T
 from core.stream_downloader import is_stream_url
 
 
@@ -39,19 +39,19 @@ class RefreshUrlDialog(QDialog):
         # Social / Media Guidance Banner
         if self.is_social or self.is_error:
             banner_box = QFrame()
-            banner_box.setStyleSheet("""
-                QFrame {
-                    background-color: #1f2335;
-                    border: 1px solid #ff9e64;
+            banner_box.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {T['bg_panel']};
+                    border: 1px solid {T['color_orange']};
                     border-radius: 8px;
                     padding: 8px;
-                }
+                }}
             """)
             b_layout = QVBoxLayout(banner_box)
             b_layout.setSpacing(6)
 
             lbl_b_title = QLabel("💡 Sosyal Medya İndirme Yardımı / Manuel Link Girişi")
-            lbl_b_title.setStyleSheet("font-weight: bold; color: #ff9e64; font-size: 13px;")
+            lbl_b_title.setStyleSheet(f"font-weight: bold; color: {T['color_orange']}; font-size: 13px;")
             b_layout.addWidget(lbl_b_title)
 
             lbl_b_desc = QLabel(
@@ -60,7 +60,7 @@ class RefreshUrlDialog(QDialog):
                 "• Yeni bağlantıyı aşağıdaki alana yapıştırıp 'Adresi Güncelle ve Devam Et' seçeneğini kullanın."
             )
             lbl_b_desc.setWordWrap(True)
-            lbl_b_desc.setStyleSheet("color: #c0caf5; font-size: 11px; line-height: 140%;")
+            lbl_b_desc.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px; line-height: 140%;")
             b_layout.addWidget(lbl_b_desc)
 
             btn_open_browser = QPushButton("🌐 Videoyu Tarayıcıda Aç")
@@ -76,7 +76,7 @@ class RefreshUrlDialog(QDialog):
         f_info = QFormLayout(grp_info)
 
         lbl_file = QLabel(self.record.get("filename", "Bilinmiyor"))
-        lbl_file.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_file.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         f_info.addRow("Dosya Adı:", lbl_file)
 
         # Current error if available
@@ -84,19 +84,19 @@ class RefreshUrlDialog(QDialog):
         if err_msg:
             lbl_err = QLabel(err_msg)
             lbl_err.setWordWrap(True)
-            lbl_err.setStyleSheet("color: #f7768e; font-size: 11px; font-weight: bold;")
+            lbl_err.setStyleSheet(f"color: {T['danger']}; font-size: 11px; font-weight: bold;")
             f_info.addRow("Karşılaşılan Sorun:", lbl_err)
 
         done = self.record.get("downloaded_size", 0)
         tot = self.record.get("total_size", -1)
         lbl_progress = QLabel(format_progress_size(done, tot))
-        lbl_progress.setStyleSheet("color: #9ece6a; font-weight: bold;")
+        lbl_progress.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
         f_info.addRow("Mevcut İlerleme:", lbl_progress)
 
         txt_old_url = self.old_url if len(self.old_url) <= 65 else self.old_url[:62] + "..."
         lbl_old = QLabel(txt_old_url)
         lbl_old.setToolTip(self.old_url)
-        lbl_old.setStyleSheet("color: #565f89; font-size: 11px;")
+        lbl_old.setStyleSheet(f"color: {T['disabled_text']}; font-size: 11px;")
         f_info.addRow("Eski / Mevcut URL:", lbl_old)
 
         layout.addWidget(grp_info)
@@ -132,7 +132,7 @@ class RefreshUrlDialog(QDialog):
 
         lbl_hint = QLabel("💡 Not: RipSync mevcut indirilmiş parçaları koruyacak ve yeni link üzerinden indirmeyi devam ettirecektir.")
         lbl_hint.setWordWrap(True)
-        lbl_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
+        lbl_hint.setStyleSheet(f"color: {T['accent']}; font-size: 11px;")
         layout.addWidget(lbl_hint)
 
         # Buttons

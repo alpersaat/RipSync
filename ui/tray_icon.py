@@ -5,6 +5,7 @@ from core.notifier import notify_download_completed, notify_error, notify_warnin
 
 import os
 from core.paths import get_icon_path
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 def create_default_icon() -> QIcon:
     """Generate or load icon for tray and window."""
@@ -20,13 +21,13 @@ def create_default_icon() -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     # Rounded blue background
-    painter.setBrush(QColor("#3d59a1"))
-    painter.setPen(QColor("#7aa2f7"))
+    painter.setBrush(QColor(T['accent_primary']))
+    painter.setPen(QColor(T['accent']))
     painter.drawRoundedRect(4, 4, 56, 56, 12, 12)
 
     # Down arrow
-    painter.setBrush(QColor("#ffffff"))
-    painter.setPen(QColor("#ffffff"))
+    painter.setBrush(QColor(T['text_on_accent']))
+    painter.setPen(QColor(T['text_on_accent']))
     # Arrow stem
     painter.drawRect(26, 14, 12, 18)
     # Arrow head points

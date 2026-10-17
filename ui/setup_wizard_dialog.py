@@ -23,6 +23,7 @@ from core.extension_installer import (
 )
 from ui.extension_guide_dialog import BrowserMockupCard
 from ui.tray_icon import create_default_icon
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 
 class SetupWizardDialog(QDialog):
@@ -36,51 +37,51 @@ class SetupWizardDialog(QDialog):
         self.setWindowTitle("RipSync - Kurulum ve Başlangıç Sihirbazı")
         self.setWindowIcon(create_default_icon())
         self.setFixedSize(720, 640)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1a1b26;
-                color: #c0caf5;
-            }
-            QLabel {
-                color: #c0caf5;
-            }
-            QPushButton {
-                background-color: #24283b;
-                color: #c0caf5;
-                border: 1px solid #414868;
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {T['bg_main']};
+                color: {T['text_primary']};
+            }}
+            QLabel {{
+                color: {T['text_primary']};
+            }}
+            QPushButton {{
+                background-color: {T['bg_card']};
+                color: {T['text_primary']};
+                border: 1px solid {T['border']};
                 border-radius: 6px;
                 padding: 8px 16px;
                 font-weight: bold;
                 font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #3b4261;
-                border-color: #7aa2f7;
-            }
-            QPushButton#primaryBtn {
-                background-color: #3d59a1;
-                color: #ffffff;
-                border: 1px solid #7aa2f7;
-            }
-            QPushButton#primaryBtn:hover {
-                background-color: #7aa2f7;
-                color: #15161e;
-            }
-            QPushButton#successBtn {
-                background-color: #1b4d3e;
-                color: #9ece6a;
-                border: 1px solid #9ece6a;
-            }
-            QPushButton#successBtn:hover {
-                background-color: #9ece6a;
-                color: #15161e;
-            }
-            QFrame.stepBox {
-                background-color: #1f2335;
-                border: 1px solid #292e42;
+            }}
+            QPushButton:hover {{
+                background-color: {T['border']};
+                border-color: {T['accent']};
+            }}
+            QPushButton#primaryBtn {{
+                background-color: {T['accent_primary']};
+                color: {T['text_on_accent']};
+                border: 1px solid {T['accent']};
+            }}
+            QPushButton#primaryBtn:hover {{
+                background-color: {T['accent']};
+                color: {T['code_bg']};
+            }}
+            QPushButton#successBtn {{
+                background-color: {T['success_bg']};
+                color: {T['success']};
+                border: 1px solid {T['success']};
+            }}
+            QPushButton#successBtn:hover {{
+                background-color: {T['success']};
+                color: {T['code_bg']};
+            }}
+            QFrame.stepBox {{
+                background-color: {T['bg_panel']};
+                border: 1px solid {T['bg_hover']};
                 border-radius: 8px;
                 padding: 12px;
-            }
+            }}
         """)
 
         self._init_ui()
@@ -92,15 +93,15 @@ class SetupWizardDialog(QDialog):
 
         # Wizard Header Bar
         header_frame = QFrame()
-        header_frame.setStyleSheet("background-color: #16161e; border-radius: 8px; padding: 6px 12px;")
+        header_frame.setStyleSheet(f"background-color: {T['code_bg']}; border-radius: 8px; padding: 6px 12px;")
         h_layout = QHBoxLayout(header_frame)
         self.lbl_wizard_title = QLabel("🧙 RipSync Kurulum Sihirbazı")
-        self.lbl_wizard_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #7aa2f7;")
+        self.lbl_wizard_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {T['accent']};")
         h_layout.addWidget(self.lbl_wizard_title)
         h_layout.addStretch()
 
         self.lbl_step_num = QLabel("Sayfa 1 / 3")
-        self.lbl_step_num.setStyleSheet("color: #e0af68; font-weight: bold; font-size: 12px;")
+        self.lbl_step_num.setStyleSheet(f"color: {T['warning']}; font-weight: bold; font-size: 12px;")
         h_layout.addWidget(self.lbl_step_num)
         main_layout.addWidget(header_frame)
 
@@ -127,7 +128,7 @@ class SetupWizardDialog(QDialog):
 
         self.chk_dont_show = QCheckBox("Açılışta bu sihirbazı bir daha gösterme")
         self.chk_dont_show.setChecked(True)
-        self.chk_dont_show.setStyleSheet("color: #9aa5ce; font-size: 11px;")
+        self.chk_dont_show.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         bottom_layout.addWidget(self.chk_dont_show)
         bottom_layout.addStretch()
 
@@ -150,7 +151,7 @@ class SetupWizardDialog(QDialog):
         layout.setSpacing(14)
 
         title = QLabel("RipSync'e Hoş Geldiniz! 🚀")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #7aa2f7;")
+        title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {T['accent']};")
         layout.addWidget(title)
 
         desc = QLabel(
@@ -160,7 +161,7 @@ class SetupWizardDialog(QDialog):
             "Bu sihirbaz, indirme klasörünüzü belirlemenize ve tarayıcı eklentisini kurmanıza yardımcı olacaktır."
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #c0caf5; font-size: 12px; line-height: 1.4;")
+        desc.setStyleSheet(f"color: {T['text_primary']}; font-size: 12px; line-height: 1.4;")
         layout.addWidget(desc)
 
         # Download Directory Selector Box
@@ -170,18 +171,18 @@ class SetupWizardDialog(QDialog):
         b_layout.setSpacing(8)
 
         b_title = QLabel("📁 <b>Varsayılan İndirme Klasörü:</b>")
-        b_title.setStyleSheet("color: #bb9af7; font-size: 12px;")
+        b_title.setStyleSheet(f"color: {T['color_purple']}; font-size: 12px;")
         b_layout.addWidget(b_title)
 
         curr_dir = self.db.get_setting("download_dir", get_default_download_dir())
         self.lbl_curr_dir = QLabel(curr_dir)
-        self.lbl_curr_dir.setStyleSheet("""
-            background-color: #16161e;
-            border: 1px solid #3b4261;
+        self.lbl_curr_dir.setStyleSheet(f"""
+            background-color: {T['code_bg']};
+            border: 1px solid {T['border']};
             border-radius: 6px;
             padding: 8px;
             font-family: Consolas, monospace;
-            color: #7dcfff;
+            color: {T['color_cyan']};
         """)
         self.lbl_curr_dir.setWordWrap(True)
         b_layout.addWidget(self.lbl_curr_dir)
@@ -201,7 +202,7 @@ class SetupWizardDialog(QDialog):
         layout.setSpacing(12)
 
         title = QLabel("🌐 Tarayıcı Eklentisi Kurulumu")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #7aa2f7;")
+        title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {T['accent']};")
         layout.addWidget(title)
 
         desc = QLabel(
@@ -209,7 +210,7 @@ class SetupWizardDialog(QDialog):
             "eklenti kurulumu gereklidir. Aşağıdaki seçeneklerden dilediğinizi kullanabilirsiniz:"
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #a9b1d6; font-size: 12px;")
+        desc.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px;")
         layout.addWidget(desc)
 
         # Quick Auto-Install Box
@@ -219,14 +220,14 @@ class SetupWizardDialog(QDialog):
         ab_layout.setSpacing(8)
 
         ab_title = QLabel("⚡ <b>Seçenek 1: Otomatik Yükleme & Başlatma (Tavsiye Edilen)</b>")
-        ab_title.setStyleSheet("color: #9ece6a; font-size: 12px;")
+        ab_title.setStyleSheet(f"color: {T['success']}; font-size: 12px;")
         ab_layout.addWidget(ab_title)
 
         detected = get_detected_browsers()
         detected_names = ", ".join([d["name"] for d in detected.values()]) if detected else "Chromium Tarayıcısı"
         ab_sub = QLabel(f"Tespit Edilen Tarayıcılar: <b>{detected_names}</b>\n"
                         "Tarayıcınızı eklentiyle birlikte tek tıkla otomatik olarak başlatabilirsiniz.")
-        ab_sub.setStyleSheet("color: #c0caf5; font-size: 11px;")
+        ab_sub.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px;")
         ab_layout.addWidget(ab_sub)
 
         btn_row = QHBoxLayout()
@@ -253,7 +254,7 @@ class SetupWizardDialog(QDialog):
         gb_layout.setSpacing(6)
 
         gb_title = QLabel("🖼 <b>Seçenek 2: Adımlı Görsel Rehber (Manuel Kurulum)</b>")
-        gb_title.setStyleSheet("color: #e0af68; font-size: 12px;")
+        gb_title.setStyleSheet(f"color: {T['warning']}; font-size: 12px;")
         gb_layout.addWidget(gb_title)
 
         self.wizard_card_stack = QStackedWidget()
@@ -271,7 +272,7 @@ class SetupWizardDialog(QDialog):
         # Card controls
         c_nav = QHBoxLayout()
         self.lbl_card_num = QLabel("Adım 1 / 4")
-        self.lbl_card_num.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 11px;")
+        self.lbl_card_num.setStyleSheet(f"font-weight: bold; color: {T['accent']}; font-size: 11px;")
         c_nav.addWidget(self.lbl_card_num)
         c_nav.addStretch()
 
@@ -295,7 +296,7 @@ class SetupWizardDialog(QDialog):
         layout.setSpacing(14)
 
         title = QLabel("Kurulum Tamamlandı! 🎉")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #9ece6a;")
+        title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {T['success']};")
         layout.addWidget(title)
 
         desc = QLabel(
@@ -305,7 +306,7 @@ class SetupWizardDialog(QDialog):
             "• İstediğiniz zaman araç çubuğundaki 'Eklenti' veya 'Ayarlar' menüsünden rehbere tekrar ulaşabilirsiniz."
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #c0caf5; font-size: 13px; line-height: 1.5;")
+        desc.setStyleSheet(f"color: {T['text_primary']}; font-size: 13px; line-height: 1.5;")
         layout.addWidget(desc)
 
         # Summary box

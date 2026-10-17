@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, QTime, QTimer, pyqtSignal
 from core.database import Database
 from core.queue_manager import QueueManager
 from core.scheduler import DownloadScheduler, DAY_NAMES_TR, parse_time_str
-from ui.styles import format_size
+from ui.styles import format_size, T
 
 class SchedulerDialog(QDialog):
     queue_started = pyqtSignal()
@@ -47,7 +47,7 @@ class SchedulerDialog(QDialog):
 
         # Header Title Banner
         header = QFrame()
-        header.setStyleSheet("background-color: #1f2335; border: 1px solid #292e42; border-radius: 8px; padding: 10px;")
+        header.setStyleSheet(f"background-color: {T['bg_panel']}; border: 1px solid {T['bg_hover']}; border-radius: 8px; padding: 10px;")
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(10, 6, 10, 6)
 
@@ -57,9 +57,9 @@ class SchedulerDialog(QDialog):
 
         title_box = QVBoxLayout()
         lbl_title = QLabel("Zamanlayıcı & Sıralı İndirme Kuyruğu")
-        lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #7aa2f7;")
+        lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {T['accent']};")
         lbl_desc = QLabel("Gece indirmelerini otomatik başlatıp durdurun, sıralı indirme limitini ve önceliklerini yönetin.")
-        lbl_desc.setStyleSheet("color: #a9b1d6; font-size: 12px;")
+        lbl_desc.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px;")
         title_box.addWidget(lbl_title)
         title_box.addWidget(lbl_desc)
         h_layout.addLayout(title_box)
@@ -81,18 +81,18 @@ class SchedulerDialog(QDialog):
 
         # Live Status Bar at bottom of dialog
         self.status_frame = QFrame()
-        self.status_frame.setStyleSheet("background-color: #24283b; border: 1px solid #414868; border-radius: 6px; padding: 8px;")
+        self.status_frame.setStyleSheet(f"background-color: {T['bg_card']}; border: 1px solid {T['border']}; border-radius: 6px; padding: 8px;")
         sf_layout = QHBoxLayout(self.status_frame)
         sf_layout.setContentsMargins(10, 6, 10, 6)
 
         self.lbl_live_status = QLabel("Zamanlayıcı Durumu: Bekleniyor...")
-        self.lbl_live_status.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 13px;")
+        self.lbl_live_status.setStyleSheet(f"font-weight: bold; color: {T['accent']}; font-size: 13px;")
         sf_layout.addWidget(self.lbl_live_status)
 
         sf_layout.addStretch()
 
         self.lbl_countdown = QLabel("--")
-        self.lbl_countdown.setStyleSheet("font-weight: bold; color: #ff9e64; font-size: 13px;")
+        self.lbl_countdown.setStyleSheet(f"font-weight: bold; color: {T['color_orange']}; font-size: 13px;")
         sf_layout.addWidget(self.lbl_countdown)
 
         main_layout.addWidget(self.status_frame)
@@ -101,7 +101,7 @@ class SchedulerDialog(QDialog):
         btn_layout = QHBoxLayout()
 
         self.btn_start_queue = QPushButton("⚡ Şimdi Kuyruğu Başlat")
-        self.btn_start_queue.setStyleSheet("background-color: #2ac3de; color: #1a1b26; font-weight: bold; padding: 7px 14px;")
+        self.btn_start_queue.setStyleSheet(f"background-color: {T['color_sky']}; color: {T['bg_main']}; font-weight: bold; padding: 7px 14px;")
         self.btn_start_queue.clicked.connect(self._start_queue_now)
         btn_layout.addWidget(self.btn_start_queue)
 
@@ -130,7 +130,7 @@ class SchedulerDialog(QDialog):
 
         # Master Checkbox
         self.chk_enable_scheduler = QCheckBox("Zamanlayıcıyı Etkinleştir (Otomatik Başlatma / Durdurma)")
-        self.chk_enable_scheduler.setStyleSheet("font-weight: bold; font-size: 14px; color: #9ece6a;")
+        self.chk_enable_scheduler.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {T['success']};")
         self.chk_enable_scheduler.toggled.connect(self._on_scheduler_toggled)
         layout.addWidget(self.chk_enable_scheduler)
 
@@ -153,7 +153,7 @@ class SchedulerDialog(QDialog):
         row_start.addWidget(self.time_start)
 
         lbl_s_info = QLabel("(Örn. Gece 02:00)")
-        lbl_s_info.setStyleSheet("color: #7982a9; font-size: 11px;")
+        lbl_s_info.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         row_start.addWidget(lbl_s_info)
         row_start.addStretch()
         t_layout.addLayout(row_start)
@@ -172,7 +172,7 @@ class SchedulerDialog(QDialog):
         row_stop.addWidget(self.time_stop)
 
         lbl_e_info = QLabel("(Örn. Sabah 07:00)")
-        lbl_e_info.setStyleSheet("color: #7982a9; font-size: 11px;")
+        lbl_e_info.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         row_stop.addWidget(lbl_e_info)
         row_stop.addStretch()
         t_layout.addLayout(row_stop)
@@ -180,7 +180,7 @@ class SchedulerDialog(QDialog):
         # Quick Presets Buttons Row
         preset_row = QHBoxLayout()
         lbl_pr = QLabel("Hızlı Şablonlar:")
-        lbl_pr.setStyleSheet("color: #7982a9; font-size: 11px;")
+        lbl_pr.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         preset_row.addWidget(lbl_pr)
 
         btn_night = QPushButton("🌙 Gece İndirmesi (02:00 - 07:00)")
@@ -265,7 +265,7 @@ class SchedulerDialog(QDialog):
         ss_layout = QVBoxLayout(self.grp_speed_schedule)
 
         self.chk_enable_speed_schedule = QCheckBox("Belirli saatlerde hız limiti uygula (Diğer saatlerde sınırsız tam hız)")
-        self.chk_enable_speed_schedule.setStyleSheet("font-weight: bold; color: #2ac3de;")
+        self.chk_enable_speed_schedule.setStyleSheet(f"font-weight: bold; color: {T['color_sky']};")
         self.chk_enable_speed_schedule.toggled.connect(self._on_speed_schedule_toggled)
         ss_layout.addWidget(self.chk_enable_speed_schedule)
 
@@ -299,7 +299,7 @@ class SchedulerDialog(QDialog):
         ss_layout.addLayout(row_ss)
 
         lbl_ss_note = QLabel("💡 Belirlenen saatlerde (ör. 09:00 - 18:00) hız sınırı otomatik devreye girer; bu saatler dışında indirmeler tam hızda çalışır.")
-        lbl_ss_note.setStyleSheet("color: #7982a9; font-size: 11px;")
+        lbl_ss_note.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         ss_layout.addWidget(lbl_ss_note)
 
         layout.addWidget(self.grp_speed_schedule)
@@ -321,7 +321,7 @@ class SchedulerDialog(QDialog):
 
         row_c = QHBoxLayout()
         lbl_c = QLabel("Aynı anda kaç dosya indirilsin (Eşzamanlı Limit):")
-        lbl_c.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_c.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         row_c.addWidget(lbl_c)
 
         self.spin_concurrent = QSpinBox()
@@ -338,7 +338,7 @@ class SchedulerDialog(QDialog):
             "💡 Mantık: Örneğin 2 seçildiğinde, kuyruktan aynı anda en fazla 2 dosya indirilir.\n"
             "Dosyalardan biri tamamlandığında, duraklatıldığında veya hata verdiğinde sıradaki dosya otomatik olarak başlar."
         )
-        lbl_conc_help.setStyleSheet("color: #7982a9; font-size: 11px;")
+        lbl_conc_help.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         c_layout.addWidget(lbl_conc_help)
 
         layout.addWidget(grp_conc)
@@ -564,16 +564,16 @@ class SchedulerDialog(QDialog):
         status = self.scheduler.get_status()
         if not status["enabled"]:
             self.lbl_live_status.setText("⏱ Zamanlayıcı: Devre Dışı")
-            self.lbl_live_status.setStyleSheet("color: #7982a9; font-weight: bold;")
+            self.lbl_live_status.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold;")
             self.lbl_countdown.setText("Kapalı")
-            self.lbl_countdown.setStyleSheet("color: #7982a9; font-weight: bold;")
+            self.lbl_countdown.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold;")
         elif status["is_in_window"]:
             self.lbl_live_status.setText(f"🟢 Zamanlayıcı Aktif ({status['state_text']})")
-            self.lbl_live_status.setStyleSheet("color: #9ece6a; font-weight: bold;")
+            self.lbl_live_status.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
             self.lbl_countdown.setText(f"⏳ Kalan Süre: {status['time_remaining_str']}")
-            self.lbl_countdown.setStyleSheet("color: #2ac3de; font-weight: bold;")
+            self.lbl_countdown.setStyleSheet(f"color: {T['color_sky']}; font-weight: bold;")
         else:
             self.lbl_live_status.setText(f"🟡 Zamanlayıcı Beklemede ({status['state_text']})")
-            self.lbl_live_status.setStyleSheet("color: #e0af68; font-weight: bold;")
+            self.lbl_live_status.setStyleSheet(f"color: {T['warning']}; font-weight: bold;")
             self.lbl_countdown.setText(f"⏳ Başlamaya: {status['time_remaining_str']}")
-            self.lbl_countdown.setStyleSheet("color: #ff9e64; font-weight: bold;")
+            self.lbl_countdown.setStyleSheet(f"color: {T['color_orange']}; font-weight: bold;")

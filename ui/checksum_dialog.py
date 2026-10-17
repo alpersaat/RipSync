@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QFormLayout, QApplication
 )
 
-from ui.styles import format_size
+from ui.styles import format_size, T
 
 
 class ChecksumWorker(QThread):
@@ -92,16 +92,16 @@ class ChecksumDialog(QDialog):
         fsize = os.path.getsize(self.file_path) if os.path.exists(self.file_path) else 0
 
         lbl_name = QLabel(fname)
-        lbl_name.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_name.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         f_file.addRow("Dosya Adı:", lbl_name)
 
         lbl_path = QLabel(self.file_path)
-        lbl_path.setStyleSheet("color: #a9b1d6; font-size: 11px;")
+        lbl_path.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px;")
         lbl_path.setWordWrap(True)
         f_file.addRow("Dosya Konumu:", lbl_path)
 
         lbl_sz = QLabel(format_size(fsize))
-        lbl_sz.setStyleSheet("color: #9ece6a; font-weight: bold;")
+        lbl_sz.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
         f_file.addRow("Boyut:", lbl_sz)
 
         layout.addWidget(grp_file)
@@ -114,7 +114,7 @@ class ChecksumDialog(QDialog):
         layout.addWidget(self.prog_bar)
 
         self.lbl_status = QLabel("Hesaplanıyor... Lütfen bekleyin.")
-        self.lbl_status.setStyleSheet("color: #e0af68; font-weight: bold;")
+        self.lbl_status.setStyleSheet(f"color: {T['warning']}; font-weight: bold;")
         layout.addWidget(self.lbl_status)
 
         # Calculated Hashes Group
@@ -162,7 +162,7 @@ class ChecksumDialog(QDialog):
         v_verify = QVBoxLayout(grp_verify)
 
         lbl_prompt = QLabel("Web sitesinde veya indirme sayfasında belirtilen orijinal hash değerini buraya yapıştırın:")
-        lbl_prompt.setStyleSheet("color: #c0caf5; font-size: 11px;")
+        lbl_prompt.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px;")
         v_verify.addWidget(lbl_prompt)
 
         self.edit_expected = QLineEdit()
@@ -171,7 +171,7 @@ class ChecksumDialog(QDialog):
         v_verify.addWidget(self.edit_expected)
 
         self.lbl_verdict = QLabel("ℹ️ Karşılaştırmak için bir hash değeri girin.")
-        self.lbl_verdict.setStyleSheet("color: #7982a9; font-weight: bold; padding: 4px;")
+        self.lbl_verdict.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold; padding: 4px;")
         v_verify.addWidget(self.lbl_verdict)
 
         layout.addWidget(grp_verify)
@@ -200,12 +200,12 @@ class ChecksumDialog(QDialog):
 
         self.prog_bar.setValue(100)
         self.lbl_status.setText("✔ Hash değerleri başarıyla hesaplandı.")
-        self.lbl_status.setStyleSheet("color: #9ece6a; font-weight: bold;")
+        self.lbl_status.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
         self._check_match()
 
     def _on_error(self, err_msg: str):
         self.lbl_status.setText(f"❌ {err_msg}")
-        self.lbl_status.setStyleSheet("color: #f7768e; font-weight: bold;")
+        self.lbl_status.setStyleSheet(f"color: {T['danger']}; font-weight: bold;")
 
     def _check_match(self):
         if not self.calculated_hashes:
@@ -214,7 +214,7 @@ class ChecksumDialog(QDialog):
         expected = self.edit_expected.text().strip().lower()
         if not expected:
             self.lbl_verdict.setText("ℹ️ Karşılaştırmak için beklenen hash değerini buraya yapıştırın.")
-            self.lbl_verdict.setStyleSheet("color: #7982a9; font-weight: bold; padding: 4px;")
+            self.lbl_verdict.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold; padding: 4px;")
             return
 
         md5 = self.calculated_hashes.get("md5", "")
@@ -223,16 +223,16 @@ class ChecksumDialog(QDialog):
 
         if expected == md5:
             self.lbl_verdict.setText("✅ MD5 Hash Doğrulandı! (Dosya %100 Orijinal ve Bozulmamış)")
-            self.lbl_verdict.setStyleSheet("background-color: #1e3a2e; color: #73daca; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid #73daca;")
+            self.lbl_verdict.setStyleSheet(f"background-color: {T['success_bg']}; color: {T['color_teal']}; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid {T['color_teal']};")
         elif expected == sha1:
             self.lbl_verdict.setText("✅ SHA-1 Hash Doğrulandı! (Dosya %100 Orijinal ve Bozulmamış)")
-            self.lbl_verdict.setStyleSheet("background-color: #1e3a2e; color: #73daca; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid #73daca;")
+            self.lbl_verdict.setStyleSheet(f"background-color: {T['success_bg']}; color: {T['color_teal']}; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid {T['color_teal']};")
         elif expected == sha256:
             self.lbl_verdict.setText("✅ SHA-256 Hash Doğrulandı! (Dosya %100 Orijinal ve Bozulmamış)")
-            self.lbl_verdict.setStyleSheet("background-color: #1e3a2e; color: #73daca; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid #73daca;")
+            self.lbl_verdict.setStyleSheet(f"background-color: {T['success_bg']}; color: {T['color_teal']}; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid {T['color_teal']};")
         else:
             self.lbl_verdict.setText("❌ Hash Uyuşmuyor! Dosya eksik indirilmiş, bozuk veya değiştirilmiş olabilir.")
-            self.lbl_verdict.setStyleSheet("background-color: #3b1e28; color: #f7768e; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid #f7768e;")
+            self.lbl_verdict.setStyleSheet(f"background-color: {T['danger_bg']}; color: {T['danger']}; font-weight: bold; padding: 6px; border-radius: 4px; border: 1px solid {T['danger']};")
 
     def _copy_to_clipboard(self, text: str):
         if text and not text.startswith("Hesaplanıyor"):

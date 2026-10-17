@@ -10,7 +10,7 @@ from PyQt6.QtCore import pyqtSignal
 from core.database import detect_category, get_category_folder, CATEGORY_FOLDER_NAMES
 from core.playlist_parser import is_youtube_playlist_url
 from core.paths import get_disk_free_space
-from ui.styles import format_size
+from ui.styles import format_size, T
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 
@@ -46,19 +46,19 @@ class AddDownloadDialog(QDialog):
 
         # Playlist notification banner
         self.banner_playlist = QPushButton("📑 Bu bağlantı bir YouTube Çalma Listesi! RipSync Toplu İndiriciyi Aç ➔")
-        self.banner_playlist.setStyleSheet("""
-            QPushButton {
-                background-color: #3d59a1;
-                color: #ffffff;
+        self.banner_playlist.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['accent_primary']};
+                color: {T['text_on_accent']};
                 font-weight: bold;
                 padding: 8px 12px;
                 border-radius: 6px;
                 text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #7aa2f7;
-                color: #1a1b26;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['accent']};
+                color: {T['bg_main']};
+            }}
         """)
         self.banner_playlist.clicked.connect(self._open_playlist_dialog)
         self.banner_playlist.hide()
@@ -66,45 +66,45 @@ class AddDownloadDialog(QDialog):
 
         # Watermark-free notification banner for TikTok and Instagram
         self.banner_watermark_free = QLabel("✨ Instagram Reels / TikTok Algılandı: Filigransız (Watermark-Free) İndirme Desteği Aktif!")
-        self.banner_watermark_free.setStyleSheet("""
-            QLabel {
-                background-color: #1a2b3c;
-                color: #7dcfff;
+        self.banner_watermark_free.setStyleSheet(f"""
+            QLabel {{
+                background-color: {T['info_bg']};
+                color: {T['color_cyan']};
                 font-weight: bold;
                 padding: 8px 12px;
                 border-radius: 6px;
-                border: 1px solid #3d59a1;
-            }
+                border: 1px solid {T['accent_primary']};
+            }}
         """)
         self.banner_watermark_free.hide()
         layout.addWidget(self.banner_watermark_free)
 
         # Site rule banner
         self.banner_site_rule = QLabel("🌐 Site Kuralı: Bu web sitesi özel klasörünüze kaydedilecek.")
-        self.banner_site_rule.setStyleSheet("""
-            QLabel {
-                background-color: #1f2335;
-                color: #bb9af7;
+        self.banner_site_rule.setStyleSheet(f"""
+            QLabel {{
+                background-color: {T['bg_panel']};
+                color: {T['color_purple']};
                 font-weight: bold;
                 padding: 6px 12px;
                 border-radius: 6px;
-                border: 1px solid #7aa2f7;
-            }
+                border: 1px solid {T['accent']};
+            }}
         """)
         self.banner_site_rule.hide()
         layout.addWidget(self.banner_site_rule)
 
         # File conflict warning banner
         self.banner_conflict = QLabel("⚠️ Bu isimde bir dosya klasörde zaten var! RipSync ayarlarınıza göre otomatik adlandırılacak.")
-        self.banner_conflict.setStyleSheet("""
-            QLabel {
-                background-color: #2b221a;
-                color: #ff9e64;
+        self.banner_conflict.setStyleSheet(f"""
+            QLabel {{
+                background-color: {T['warning_bg']};
+                color: {T['color_orange']};
                 font-weight: bold;
                 padding: 6px 12px;
                 border-radius: 6px;
-                border: 1px solid #ff9e64;
-            }
+                border: 1px solid {T['color_orange']};
+            }}
         """)
         self.banner_conflict.hide()
         layout.addWidget(self.banner_conflict)
@@ -206,12 +206,12 @@ class AddDownloadDialog(QDialog):
 
         # Auto-open on completion
         self.chk_auto_open = QCheckBox("🏁 İndirme tamamlandığında dosyayı otomatik aç")
-        self.chk_auto_open.setStyleSheet("color: #7aa2f7; font-weight: bold;")
+        self.chk_auto_open.setStyleSheet(f"color: {T['accent']}; font-weight: bold;")
         self.chk_auto_open.setToolTip("İndirme bittiğinde Windows'ta dosyayı otomatik olarak çalıştırır / açar")
         form.addRow("", self.chk_auto_open)
 
         self.chk_auto_extract = QCheckBox("📦 Bittiğinde arşivi otomatik klasöre çıkart (.zip, .tar vb.)")
-        self.chk_auto_extract.setStyleSheet("color: #9ece6a; font-weight: bold;")
+        self.chk_auto_extract.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
         self.chk_auto_extract.setToolTip("Arşiv dosyası tamamlandığında otomatik olarak aynı klasöre açar")
         form.addRow("", self.chk_auto_extract)
 
@@ -369,39 +369,39 @@ class AddDownloadDialog(QDialog):
             conflict_action = self.db.get_conflict_setting() if self.db else "auto_rename"
             if conflict_action == "overwrite":
                 self.banner_conflict.setText("⚠️ Dikkat: Bu isimde bir dosya klasörde zaten var! Çakışma ayarınız 'Üzerine Yaz' olduğu için mevcut dosya silinecektir.")
-                self.banner_conflict.setStyleSheet("""
-                    QLabel {
-                        background-color: #3b1f1f;
-                        color: #f7768e;
+                self.banner_conflict.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {T['danger_bg']};
+                        color: {T['danger']};
                         font-weight: bold;
                         padding: 6px 12px;
                         border-radius: 6px;
-                        border: 1px solid #f7768e;
-                    }
+                        border: 1px solid {T['danger']};
+                    }}
                 """)
             elif conflict_action == "skip":
                 self.banner_conflict.setText("⏭️ Bu isimde bir dosya klasörde zaten var! Çakışma ayarınız 'İndirmeyi Atla' olarak ayarlanmış.")
-                self.banner_conflict.setStyleSheet("""
-                    QLabel {
-                        background-color: #2b221a;
-                        color: #ff9e64;
+                self.banner_conflict.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {T['warning_bg']};
+                        color: {T['color_orange']};
                         font-weight: bold;
                         padding: 6px 12px;
                         border-radius: 6px;
-                        border: 1px solid #ff9e64;
-                    }
+                        border: 1px solid {T['color_orange']};
+                    }}
                 """)
             else:
                 self.banner_conflict.setText("🔄 Bu isimde bir dosya klasörde zaten var! RipSync ayarlarınıza göre otomatik adlandırılacak.")
-                self.banner_conflict.setStyleSheet("""
-                    QLabel {
-                        background-color: #1a2b3c;
-                        color: #7dcfff;
+                self.banner_conflict.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {T['info_bg']};
+                        color: {T['color_cyan']};
                         font-weight: bold;
                         padding: 6px 12px;
                         border-radius: 6px;
-                        border: 1px solid #3d59a1;
-                    }
+                        border: 1px solid {T['accent_primary']};
+                    }}
                 """)
             self.banner_conflict.show()
         else:

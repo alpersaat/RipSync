@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QLinearGradient, QFont
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
-from ui.styles import format_size, format_speed, format_eta
+from ui.styles import format_size, format_speed, format_eta, T
 from core.downloader import MultiThreadDownloader
 
 class SegmentVisualizerWidget(QWidget):
@@ -35,24 +35,24 @@ class SegmentVisualizerWidget(QWidget):
         height = self.height()
 
         # Background track
-        bg_color = QColor("#1f2335")
-        border_color = QColor("#414868")
+        bg_color = QColor(T['bg_panel'])
+        border_color = QColor(T['border'])
         painter.setBrush(QBrush(bg_color))
         painter.setPen(QPen(border_color, 1))
         painter.drawRoundedRect(0, 0, width - 1, height - 1, 6, 6)
 
         if self.total_size <= 0 or not self.segments:
             # Draw indeterminate or waiting
-            painter.setPen(QColor("#565f89"))
+            painter.setPen(QColor(T['disabled_text']))
             painter.setFont(QFont("Segoe UI", 9))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Bağlantı kuruluyor...")
             return
 
         # Palette of colors for distinct segments (IDM multi-thread visual feel)
         colors = [
-            QColor("#7aa2f7"), QColor("#2ac3de"), QColor("#7dcfff"),
-            QColor("#9ece6a"), QColor("#bb9af7"), QColor("#ff9e64"),
-            QColor("#73daca"), QColor("#b4f9f8")
+            QColor(T['accent']), QColor(T['color_sky']), QColor(T['color_cyan']),
+            QColor(T['success']), QColor(T['color_purple']), QColor(T['color_orange']),
+            QColor(T['color_teal']), QColor(T['color_teal'])
         ]
 
         # Draw each segment's downloaded range
@@ -81,12 +81,12 @@ class SegmentVisualizerWidget(QWidget):
             painter.drawRect(x_start, 2, w_downloaded, height - 4)
 
             # Draw remaining partition boundary
-            painter.setPen(QPen(QColor("#3b4261"), 1, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor(T['border']), 1, Qt.PenStyle.DashLine))
             painter.drawLine(x_end, 2, x_end, height - 2)
 
             # Draw active head marker
             if seg.get("status") == "downloading" and x_curr < x_end:
-                painter.setPen(QPen(QColor("#ffffff"), 2))
+                painter.setPen(QPen(QColor(T['text_on_accent']), 2))
                 painter.drawLine(x_curr, 2, x_curr, height - 2)
 
         # Draw active connections count watermark
@@ -125,36 +125,36 @@ class ProgressDialog(QDialog):
 
         # File info section
         self.lbl_filename = QLabel(self.filename)
-        self.lbl_filename.setStyleSheet("font-size: 14px; font-weight: bold; color: #7aa2f7;")
+        self.lbl_filename.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {T['accent']};")
         layout.addWidget(self.lbl_filename)
 
         # Grid for metrics
         grid_frame = QFrame()
-        grid_frame.setStyleSheet("background-color: #1f2335; border-radius: 8px; padding: 6px;")
+        grid_frame.setStyleSheet(f"background-color: {T['bg_panel']}; border-radius: 8px; padding: 6px;")
         grid = QGridLayout(grid_frame)
         grid.setVerticalSpacing(8)
         grid.setHorizontalSpacing(16)
 
         lbl_status_title = QLabel("Durum:")
-        lbl_status_title.setStyleSheet("color: #7982a9; font-weight: bold;")
+        lbl_status_title.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold;")
         self.lbl_status = QLabel("Başlatılıyor...")
         grid.addWidget(lbl_status_title, 0, 0)
         grid.addWidget(self.lbl_status, 0, 1)
 
         lbl_size_title = QLabel("Dosya Boyutu:")
-        lbl_size_title.setStyleSheet("color: #7982a9; font-weight: bold;")
+        lbl_size_title.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold;")
         self.lbl_size = QLabel("Hesaplanıyor...")
         grid.addWidget(lbl_size_title, 1, 0)
         grid.addWidget(self.lbl_size, 1, 1)
 
         lbl_speed_title = QLabel("İndirme Hızı:")
-        lbl_speed_title.setStyleSheet("color: #7982a9; font-weight: bold;")
+        lbl_speed_title.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold;")
         self.lbl_speed = QLabel("0 KB/s")
         grid.addWidget(lbl_speed_title, 0, 2)
         grid.addWidget(self.lbl_speed, 0, 3)
 
         lbl_eta_title = QLabel("Kalan Süre:")
-        lbl_eta_title.setStyleSheet("color: #7982a9; font-weight: bold;")
+        lbl_eta_title.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold;")
         self.lbl_eta = QLabel("--")
         grid.addWidget(lbl_eta_title, 1, 2)
         grid.addWidget(self.lbl_eta, 1, 3)
@@ -170,7 +170,7 @@ class ProgressDialog(QDialog):
 
         # Segment Visualizer
         lbl_segment_title = QLabel("Bağlantı Parçaları (Segment Streams):")
-        lbl_segment_title.setStyleSheet("font-size: 11px; color: #7982a9; font-weight: bold;")
+        lbl_segment_title.setStyleSheet(f"font-size: 11px; color: {T['text_secondary']}; font-weight: bold;")
         layout.addWidget(lbl_segment_title)
 
         self.segment_visualizer = SegmentVisualizerWidget()
@@ -178,21 +178,21 @@ class ProgressDialog(QDialog):
 
         # Speed Limiter Control Panel (IDM Style)
         limiter_frame = QFrame()
-        limiter_frame.setStyleSheet("background-color: #1f2335; border: 1px solid #292e42; border-radius: 8px; padding: 6px;")
+        limiter_frame.setStyleSheet(f"background-color: {T['bg_panel']}; border: 1px solid {T['bg_hover']}; border-radius: 8px; padding: 6px;")
         limiter_layout = QVBoxLayout(limiter_frame)
         limiter_layout.setContentsMargins(10, 8, 10, 8)
         limiter_layout.setSpacing(6)
 
         limiter_header = QHBoxLayout()
         self.chk_limit = QCheckBox("⚡ Hız Sınırlayıcıyı Etkinleştir (Speed Limiter)")
-        self.chk_limit.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.chk_limit.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.chk_limit.toggled.connect(self._on_speed_limit_toggled)
         limiter_header.addWidget(self.chk_limit)
 
         limiter_header.addStretch()
 
         self.lbl_limit_val = QLabel("Sınırsız (Tam Hız)")
-        self.lbl_limit_val.setStyleSheet("font-weight: bold; color: #9ece6a; font-size: 12px;")
+        self.lbl_limit_val.setStyleSheet(f"font-weight: bold; color: {T['success']}; font-size: 12px;")
         limiter_header.addWidget(self.lbl_limit_val)
 
         limiter_layout.addLayout(limiter_header)
@@ -235,7 +235,7 @@ class ProgressDialog(QDialog):
             self.chk_limit.setChecked(False)
         # Auto-open checkbox
         self.chk_auto_open = QCheckBox("🏁 İndirme tamamlandığında dosyayı otomatik aç")
-        self.chk_auto_open.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-top: 4px;")
+        self.chk_auto_open.setStyleSheet(f"color: {T['accent']}; font-weight: bold; margin-top: 4px;")
         self.chk_auto_open.setChecked(self.initial_auto_open)
         self.chk_auto_open.toggled.connect(lambda checked: self.auto_open_changed.emit(self.download_id, checked))
         layout.addWidget(self.chk_auto_open)
@@ -244,18 +244,18 @@ class ProgressDialog(QDialog):
         btn_layout = QHBoxLayout()
 
         self.btn_manual_link = QPushButton("🔗 Manuel Link Gir / Yenile")
-        self.btn_manual_link.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9e64;
-                color: #1a1b26;
+        self.btn_manual_link.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['color_orange']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 padding: 6px 14px;
                 border-radius: 6px;
                 font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #e0af68;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['warning']};
+            }}
         """)
         self.btn_manual_link.setToolTip("İndirme hata verdiğinde yeni veya doğrudan video bağlantısını girmenizi sağlar")
         self.btn_manual_link.clicked.connect(lambda: self.refresh_url_requested.emit(self.download_id))
@@ -290,7 +290,7 @@ class ProgressDialog(QDialog):
             self.speed_limit_changed.emit(self.download_id, self.current_speed_limit_bps)
         else:
             self.lbl_limit_val.setText("Sınırsız (Tam Hız)")
-            self.lbl_limit_val.setStyleSheet("font-weight: bold; color: #9ece6a; font-size: 12px;")
+            self.lbl_limit_val.setStyleSheet(f"font-weight: bold; color: {T['success']}; font-size: 12px;")
             self.current_speed_limit_bps = 0
             self.speed_limit_changed.emit(self.download_id, 0)
 
@@ -315,7 +315,7 @@ class ProgressDialog(QDialog):
         else:
             text = f"Maksimum: {kb_val} KB/s"
         self.lbl_limit_val.setText(text)
-        self.lbl_limit_val.setStyleSheet("font-weight: bold; color: #ff9e64; font-size: 12px;")
+        self.lbl_limit_val.setStyleSheet(f"font-weight: bold; color: {T['color_orange']}; font-size: 12px;")
 
     def _toggle_pause(self):
         if self.is_paused:
@@ -389,24 +389,24 @@ class ProgressDialog(QDialog):
     def update_status(self, status: str, err: str = ""):
         self.lbl_status.setText(status if not err else f"Hata: {err}")
         if status == "Completed":
-            self.lbl_status.setStyleSheet("color: #9ece6a; font-weight: bold;")
+            self.lbl_status.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
             self.btn_pause.setEnabled(False)
             self.prog_bar.setValue(100)
             self.lbl_speed.setText("Tamamlandı")
             self.lbl_eta.setText("0 sn")
             self.btn_manual_link.hide()
         elif status == "Paused":
-            self.lbl_status.setStyleSheet("color: #e0af68; font-weight: bold;")
+            self.lbl_status.setStyleSheet(f"color: {T['warning']}; font-weight: bold;")
             self.btn_pause.setText("Devam Et")
             self.is_paused = True
             self.btn_manual_link.hide()
         elif status == "Downloading":
-            self.lbl_status.setStyleSheet("color: #7aa2f7; font-weight: bold;")
+            self.lbl_status.setStyleSheet(f"color: {T['accent']}; font-weight: bold;")
             self.btn_pause.setText("Duraklat")
             self.is_paused = False
             self.btn_manual_link.hide()
         elif status == "Error":
-            self.lbl_status.setStyleSheet("color: #f7768e; font-weight: bold;")
+            self.lbl_status.setStyleSheet(f"color: {T['danger']}; font-weight: bold;")
             self.lbl_status.setWordWrap(True)
             if err:
                 self.lbl_status.setToolTip(err)

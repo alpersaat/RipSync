@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 
 from core.categories import detect_category, get_category_folder
 from core.pattern_generator import generate_urls_from_pattern
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 
 def extract_valid_urls(text: str) -> List[str]:
@@ -59,7 +60,7 @@ class PatternWizardDialog(QDialog):
             "• Harf Aralığı: <code>https://sunucu.com/part_[a-e].rar</code><br>"
             "• Yer Tutucu: <code>https://sunucu.com/sayfa_(*).html</code>"
         )
-        lbl_desc.setStyleSheet("color: #a9b1d6; background-color: #1a1b26; border: 1px solid #292e42; border-radius: 6px; padding: 10px; font-size: 11px;")
+        lbl_desc.setStyleSheet(f"color: {T['text_muted']}; background-color: {T['bg_main']}; border: 1px solid {T['bg_hover']}; border-radius: 6px; padding: 10px; font-size: 11px;")
         layout.addWidget(lbl_desc)
 
         form = QFormLayout()
@@ -107,16 +108,16 @@ class PatternWizardDialog(QDialog):
 
         # Preview area
         lbl_prev_title = QLabel("Canlı Önizleme:")
-        lbl_prev_title.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_prev_title.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         layout.addWidget(lbl_prev_title)
 
         self.txt_preview = QPlainTextEdit()
         self.txt_preview.setReadOnly(True)
-        self.txt_preview.setStyleSheet("background-color: #1a1b26; border: 1px solid #3b4261; border-radius: 6px; font-family: Consolas; font-size: 11px; color: #9ece6a;")
+        self.txt_preview.setStyleSheet(f"background-color: {T['bg_main']}; border: 1px solid {T['border']}; border-radius: 6px; font-family: Consolas; font-size: 11px; color: {T['success']};")
         layout.addWidget(self.txt_preview, stretch=1)
 
         self.lbl_preview_count = QLabel("Üretilecek Bağlantı: 0")
-        self.lbl_preview_count.setStyleSheet("color: #bb9af7; font-weight: bold;")
+        self.lbl_preview_count.setStyleSheet(f"color: {T['color_purple']}; font-weight: bold;")
         layout.addWidget(self.lbl_preview_count)
 
         # Dialog Buttons
@@ -124,7 +125,7 @@ class PatternWizardDialog(QDialog):
         btn_box.addStretch()
 
         btn_insert = QPushButton("🪄 Bağlantıları Üret ve Ekle")
-        btn_insert.setStyleSheet("background-color: #7aa2f7; color: #1a1b26; font-weight: bold; padding: 6px 16px;")
+        btn_insert.setStyleSheet(f"background-color: {T['accent']}; color: {T['bg_main']}; font-weight: bold; padding: 6px 16px;")
         btn_insert.clicked.connect(self._on_insert)
         btn_box.addWidget(btn_insert)
 
@@ -192,7 +193,7 @@ class BatchAddDialog(QDialog):
 
         # Header Info
         lbl_info = QLabel("İndirmek istediğiniz tüm bağlantıları her satıra bir adet gelecek şekilde yapıştırın:")
-        lbl_info.setStyleSheet("color: #c0caf5; font-size: 12px; font-weight: bold;")
+        lbl_info.setStyleSheet(f"color: {T['text_primary']}; font-size: 12px; font-weight: bold;")
         layout.addWidget(lbl_info)
 
         # URLs text edit
@@ -204,8 +205,8 @@ class BatchAddDialog(QDialog):
             "https://ornek.com/muzik.mp3"
         )
         self.txt_urls.setStyleSheet(
-            "QPlainTextEdit { background-color: #1a1b26; border: 1px solid #3b4261; border-radius: 6px; padding: 8px; color: #c0caf5; font-family: Consolas, monospace; font-size: 12px; }"
-            "QPlainTextEdit:focus { border: 1px solid #7aa2f7; }"
+            f"QPlainTextEdit {{ background-color: {T['bg_main']}; border: 1px solid {T['border']}; border-radius: 6px; padding: 8px; color: {T['text_primary']}; font-family: Consolas, monospace; font-size: 12px; }}"
+            f"QPlainTextEdit:focus {{ border: 1px solid {T['accent']}; }}"
         )
         self.txt_urls.textChanged.connect(self._on_text_changed)
         layout.addWidget(self.txt_urls, stretch=1)
@@ -224,7 +225,7 @@ class BatchAddDialog(QDialog):
 
         btn_pattern_wizard = QPushButton("🪄 Kalıp Sihirbazı ([01-50])")
         btn_pattern_wizard.setObjectName("btn_secondary")
-        btn_pattern_wizard.setStyleSheet("color: #bb9af7; font-weight: bold;")
+        btn_pattern_wizard.setStyleSheet(f"color: {T['color_purple']}; font-weight: bold;")
         btn_pattern_wizard.clicked.connect(self._open_pattern_wizard)
         act_row.addWidget(btn_pattern_wizard)
 
@@ -236,7 +237,7 @@ class BatchAddDialog(QDialog):
         act_row.addStretch()
 
         self.lbl_count = QLabel("⚡ Algılanan Bağlantı: 0 adet")
-        self.lbl_count.setStyleSheet("color: #7aa2f7; font-weight: bold; font-size: 12px;")
+        self.lbl_count.setStyleSheet(f"color: {T['accent']}; font-weight: bold; font-size: 12px;")
         act_row.addWidget(self.lbl_count)
 
         layout.addLayout(act_row)
@@ -294,7 +295,7 @@ class BatchAddDialog(QDialog):
         # Start now
         self.chk_start_now = QCheckBox("Hemen İndirmeye Başla (Sıralı kuyruğa alıp sırayla indir)")
         self.chk_start_now.setChecked(True)
-        self.chk_start_now.setStyleSheet("font-weight: bold; color: #9ece6a;")
+        self.chk_start_now.setStyleSheet(f"font-weight: bold; color: {T['success']};")
         f_opts.addRow("", self.chk_start_now)
 
         layout.addWidget(grp_opts)
@@ -305,7 +306,7 @@ class BatchAddDialog(QDialog):
 
         self.btn_confirm = QPushButton("▶ Kuyruğa Ekle (0 İndirme)")
         self.btn_confirm.setEnabled(False)
-        self.btn_confirm.setStyleSheet("background-color: #7aa2f7; color: #1a1b26; font-weight: bold; padding: 7px 18px;")
+        self.btn_confirm.setStyleSheet(f"background-color: {T['accent']}; color: {T['bg_main']}; font-weight: bold; padding: 7px 18px;")
         self.btn_confirm.clicked.connect(self._on_confirm)
         btn_layout.addWidget(self.btn_confirm)
 

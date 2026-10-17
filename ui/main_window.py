@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut, QDrag, QDragEnterEvent, QDropEvent
 
 from datetime import datetime
-from ui.styles import DARK_THEME, get_theme_stylesheet, format_size, format_progress_size, format_speed, format_eta
+from ui.styles import DARK_THEME, get_theme_stylesheet, format_size, format_progress_size, format_speed, format_eta, T
 from ui.add_download_dialog import AddDownloadDialog
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
@@ -120,8 +120,11 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("RipSync - Internet Download Manager")
         self.setWindowIcon(create_default_icon())
-        thm_cfg = self.db.get_theme_settings()
-        self.setStyleSheet(get_theme_stylesheet(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue")))
+        from ui import styles as _styles
+        _styles.set_database(db)
+        thm_cfg = db.get_theme_settings()
+        _styles.refresh_tokens(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue"))
+        self.setStyleSheet(_styles.get_app_stylesheet())
 
         self.current_category = "All"
         self.current_tag: Optional[str] = None
@@ -441,7 +444,7 @@ class MainWindow(QMainWindow):
         tb_conc_layout.setSpacing(6)
 
         lbl_conc = QLabel("⚡ Sıralı:")
-        lbl_conc.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_conc.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         lbl_conc.setToolTip("Aynı anda indirilecek maksimum dosya sayısı (Sıralı İndirme Limiti)")
         tb_conc_layout.addWidget(lbl_conc)
 
@@ -466,17 +469,17 @@ class MainWindow(QMainWindow):
         tb_sched_layout.setSpacing(6)
 
         self.chk_tb_scheduler = QCheckBox("⏱ Zamanlayıcı:")
-        self.chk_tb_scheduler.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.chk_tb_scheduler.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.chk_tb_scheduler.setToolTip("Gece indirmesi zamanlayıcısını Aç / Kapat")
         self.chk_tb_scheduler.toggled.connect(self._on_toolbar_scheduler_toggled)
         tb_sched_layout.addWidget(self.chk_tb_scheduler)
 
         self.lbl_tb_sched_time = QLabel("02:00 - 07:00")
-        self.lbl_tb_sched_time.setStyleSheet("color: #c0caf5; font-size: 11px;")
+        self.lbl_tb_sched_time.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px;")
         tb_sched_layout.addWidget(self.lbl_tb_sched_time)
 
         self.lbl_tb_sched_badge = QLabel("Kapalı")
-        self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #7982a9; min-width: 60px;")
+        self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['text_secondary']}; min-width: 60px;")
         tb_sched_layout.addWidget(self.lbl_tb_sched_badge)
 
         btn_sched_cfg = QPushButton("⚙")
@@ -498,7 +501,7 @@ class MainWindow(QMainWindow):
         tb_limiter_layout.setSpacing(8)
 
         self.chk_tb_speed_limit = QCheckBox("⚡ Hız Limiti:")
-        self.chk_tb_speed_limit.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.chk_tb_speed_limit.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.chk_tb_speed_limit.setToolTip("Hız Sınırlayıcıyı tek tıkla Aç / Kapat (Tam Hız)")
         self.chk_tb_speed_limit.toggled.connect(self._on_toolbar_limit_toggled)
         tb_limiter_layout.addWidget(self.chk_tb_speed_limit)
@@ -528,7 +531,7 @@ class MainWindow(QMainWindow):
         tb_limiter_layout.addWidget(self.combo_tb_limit)
 
         self.lbl_tb_limit_val = QLabel("Tam Hız")
-        self.lbl_tb_limit_val.setStyleSheet("font-weight: bold; color: #9ece6a; min-width: 75px;")
+        self.lbl_tb_limit_val.setStyleSheet(f"font-weight: bold; color: {T['success']}; min-width: 75px;")
         tb_limiter_layout.addWidget(self.lbl_tb_limit_val)
 
         self.act_limiter_widget = toolbar.addWidget(self.tb_limiter_widget)
@@ -543,7 +546,7 @@ class MainWindow(QMainWindow):
         tb_queue_layout.setSpacing(6)
 
         lbl_qa = QLabel("🏁 Kuyruk Bitince:")
-        lbl_qa.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_qa.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         tb_queue_layout.addWidget(lbl_qa)
 
         self.combo_tb_queue_action = QComboBox()
@@ -643,8 +646,8 @@ class MainWindow(QMainWindow):
         self.edit_search.setPlaceholderText("🔍 Dosya adı veya link ara... (Ctrl+F)")
         self.edit_search.setClearButtonEnabled(True)
         self.edit_search.setStyleSheet(
-            "QLineEdit { background-color: #1f2335; border: 1px solid #3b4261; border-radius: 6px; padding: 4px 10px; color: #c0caf5; font-size: 12px; min-height: 22px; }"
-            "QLineEdit:focus { border: 1px solid #7aa2f7; }"
+            f"QLineEdit {{ background-color: {T['bg_panel']}; border: 1px solid {T['border']}; border-radius: 6px; padding: 4px 10px; color: {T['text_primary']}; font-size: 12px; min-height: 22px; }}"
+            f"QLineEdit:focus {{ border: 1px solid {T['accent']}; }}"
         )
         self.edit_search.textChanged.connect(self._apply_search_and_filter)
         sf_layout.addWidget(self.edit_search, stretch=1)
@@ -662,9 +665,9 @@ class MainWindow(QMainWindow):
             btn.setCheckable(True)
             btn.setChecked(chip_id == "all")
             btn.setStyleSheet(
-                "QPushButton { background-color: #24283b; border: 1px solid #3b4261; border-radius: 5px; padding: 4px 8px; color: #a9b1d6; font-size: 11px; font-weight: bold; min-height: 20px; }"
-                "QPushButton:checked { background-color: #7aa2f7; color: #1a1b26; border-color: #7aa2f7; }"
-                "QPushButton:hover:!checked { background-color: #2f3549; color: #c0caf5; }"
+                f"QPushButton {{ background-color: {T['bg_card']}; border: 1px solid {T['border']}; border-radius: 5px; padding: 4px 8px; color: {T['text_muted']}; font-size: 11px; font-weight: bold; min-height: 20px; }}"
+                f"QPushButton:checked {{ background-color: {T['accent']}; color: {T['bg_main']}; border-color: {T['accent']}; }}"
+                f"QPushButton:hover:!checked {{ background-color: {T['bg_hover']}; color: {T['text_primary']}; }}"
             )
             btn.clicked.connect(lambda checked, c=chip_id: self._on_filter_chip_clicked(c))
             self.filter_btn_group[chip_id] = btn
@@ -692,7 +695,7 @@ class MainWindow(QMainWindow):
         sf_layout.addWidget(self.combo_date_filter)
 
         self.lbl_filter_count = QLabel("0 / 0")
-        self.lbl_filter_count.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: bold; padding: 0 4px;")
+        self.lbl_filter_count.setStyleSheet(f"color: {T['accent']}; font-size: 11px; font-weight: bold; padding: 0 4px;")
         sf_layout.addWidget(self.lbl_filter_count)
 
         right_layout.addWidget(search_filter_bar)
@@ -754,7 +757,7 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.lbl_ext_status = QLabel("Tarayıcı Köprüsü: Başlatılıyor...")
-        self.lbl_ext_status.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-left: 10px; cursor: pointer;")
+        self.lbl_ext_status.setStyleSheet(f"color: {T['accent']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
         self.lbl_ext_status.setToolTip("Tarayıcı köprüsü durumunu görmek veya yapılandırmak için tıklayın.")
         self.lbl_ext_status.mousePressEvent = self._on_lbl_ext_status_clicked
         self.status_bar.addWidget(self.lbl_ext_status)
@@ -766,36 +769,36 @@ class MainWindow(QMainWindow):
         self.status_bar.addWidget(self.speed_graph)
 
         self.lbl_speed_stat = QLabel("Toplam Hız: 0 KB/s")
-        self.lbl_speed_stat.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-left: 10px;")
+        self.lbl_speed_stat.setStyleSheet(f"color: {T['accent']}; font-weight: bold; margin-left: 10px;")
         self.status_bar.addWidget(self.lbl_speed_stat)
 
         # Disk Free Space Indicator
         self.lbl_disk_stat = QLabel("💾 Disk: Taranıyor...")
-        self.lbl_disk_stat.setStyleSheet("color: #7dcfff; font-weight: bold; margin-left: 15px;")
+        self.lbl_disk_stat.setStyleSheet(f"color: {T['color_cyan']}; font-weight: bold; margin-left: 15px;")
         self.status_bar.addWidget(self.lbl_disk_stat)
 
         self.lbl_limiter_stat = QLabel("⚡ Hız Sınırı: Kapalı (Tam Hız)")
-        self.lbl_limiter_stat.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 20px;")
+        self.lbl_limiter_stat.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 20px;")
         self.status_bar.addWidget(self.lbl_limiter_stat)
 
         self.lbl_scheduler_stat = QLabel("⏱ Zamanlayıcı: Kapalı")
-        self.lbl_scheduler_stat.setStyleSheet("color: #7982a9; font-weight: bold; margin-left: 20px;")
+        self.lbl_scheduler_stat.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold; margin-left: 20px;")
         self.status_bar.addWidget(self.lbl_scheduler_stat)
 
         # Metered Connection Status Button
         self.btn_metered_stat = QPushButton("📶 Tarifeli Bağlantı (Kota Koruması Aktif - Tıkla)")
-        self.btn_metered_stat.setStyleSheet("""
-            QPushButton {
-                background-color: #f7768e;
-                color: #1a1b26;
+        self.btn_metered_stat.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['danger']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 border-radius: 4px;
                 padding: 2px 8px;
                 margin-left: 15px;
-            }
-            QPushButton:hover {
-                background-color: #ff9e64;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['color_orange']};
+            }}
         """)
         self.btn_metered_stat.setToolTip("Tarifeli mobil veri / hotspot bağlantısı algılandı. Tıklayarak kota korumasını geçici olarak devre dışı bırakabilirsiniz.")
         self.btn_metered_stat.clicked.connect(self._on_metered_btn_clicked)
@@ -1202,11 +1205,11 @@ class MainWindow(QMainWindow):
         """Updates the status bar indicator and delivers warnings on conflict."""
         if status == "running":
             self.lbl_ext_status.setText(f"🟢 Tarayıcı Köprüsü: Aktif (Port {port})")
-            self.lbl_ext_status.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"Köprü sunucusu 127.0.0.1:{port} adresinde aktif.\nKurulum kılavuzu için tıklayın.")
         elif status == "running_fallback":
             self.lbl_ext_status.setText(f"🟡 Tarayıcı Köprüsü: Aktif (Port {port} - Çakışma Çözüldü)")
-            self.lbl_ext_status.setStyleSheet("color: #e0af68; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['warning']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"{message}\nTarayıcı eklentisi bu yeni porta otomatik bağlanacaktır.\nDetaylar için tıklayın.")
             if hasattr(self, "tray") and self.tray:
                 self.tray.showMessage(
@@ -1217,7 +1220,7 @@ class MainWindow(QMainWindow):
                 )
         elif status == "conflict":
             self.lbl_ext_status.setText(f"🔴 Tarayıcı Köprüsü: Port Çakışması (Port {port})")
-            self.lbl_ext_status.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['danger']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"Port {port} başka bir program tarafından kullanılıyor!\nAyarları açıp portu değiştirmek için tıklayın.")
             if hasattr(self, "tray") and self.tray:
                 self.tray.showMessage(
@@ -1228,11 +1231,11 @@ class MainWindow(QMainWindow):
                 )
         elif status == "error":
             self.lbl_ext_status.setText(f"🔴 Tarayıcı Köprüsü: Hata (Port {port})")
-            self.lbl_ext_status.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['danger']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"Köprü sunucusu hatası: {message}\nTekrar denemek için tıklayın.")
         elif status == "stopped":
             self.lbl_ext_status.setText("⚪ Tarayıcı Köprüsü: Kapalı")
-            self.lbl_ext_status.setStyleSheet("color: #565f89; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['disabled_text']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip("Köprü sunucusu durduruldu.")
 
     def _on_lbl_ext_status_clicked(self, event):
@@ -1974,14 +1977,14 @@ class MainWindow(QMainWindow):
             else:
                 txt = f"{kb_val} KB/s"
             self.lbl_tb_limit_val.setText(txt)
-            self.lbl_tb_limit_val.setStyleSheet("font-weight: bold; color: #ff9e64; min-width: 75px;")
+            self.lbl_tb_limit_val.setStyleSheet(f"font-weight: bold; color: {T['color_orange']}; min-width: 75px;")
             self.lbl_limiter_stat.setText(f"⚡ Hız Sınırı: Aktif ({txt})")
-            self.lbl_limiter_stat.setStyleSheet("color: #ff9e64; font-weight: bold; margin-left: 20px;")
+            self.lbl_limiter_stat.setStyleSheet(f"color: {T['color_orange']}; font-weight: bold; margin-left: 20px;")
         else:
             self.lbl_tb_limit_val.setText("Tam Hız")
-            self.lbl_tb_limit_val.setStyleSheet("font-weight: bold; color: #9ece6a; min-width: 75px;")
+            self.lbl_tb_limit_val.setStyleSheet(f"font-weight: bold; color: {T['success']}; min-width: 75px;")
             self.lbl_limiter_stat.setText("⚡ Hız Sınırı: Kapalı (Tam Hız)")
-            self.lbl_limiter_stat.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 20px;")
+            self.lbl_limiter_stat.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 20px;")
 
     def _on_toolbar_limit_toggled(self, enabled: bool):
         self.slider_tb_limit.setEnabled(enabled)
@@ -2103,7 +2106,9 @@ class MainWindow(QMainWindow):
             # Apply appearance / theme dynamically
             thm_cfg = self.db.get_theme_settings()
             app = QApplication.instance()
-            sheet = get_theme_stylesheet(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue"))
+            from ui import styles as _styles
+            _styles.refresh_tokens(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue"))
+            sheet = _styles.get_app_stylesheet()
             if app:
                 app.setStyleSheet(sheet)
             else:
@@ -2284,38 +2289,38 @@ class MainWindow(QMainWindow):
             if is_simple:
                 self.btn_mode_toggle.setText("🟢 Basit Mod (Geç: Gelişmiş ❯)")
                 self.btn_mode_toggle.setToolTip("Şu an Basit Moddasınız. Tüm gelişmiş araçları görmek için tıklayın.")
-                self.btn_mode_toggle.setStyleSheet("""
-                    QPushButton#btn_mode_toggle {
-                        background-color: #1f2335;
-                        border: 1px solid #9ece6a;
-                        color: #9ece6a;
+                self.btn_mode_toggle.setStyleSheet(f"""
+                    QPushButton#btn_mode_toggle {{
+                        background-color: {T['bg_panel']};
+                        border: 1px solid {T['success']};
+                        color: {T['success']};
                         font-weight: bold;
                         border-radius: 6px;
                         padding: 4px 10px;
                         font-size: 11px;
-                    }
-                    QPushButton#btn_mode_toggle:hover {
-                        background-color: #9ece6a;
-                        color: #1a1b26;
-                    }
+                    }}
+                    QPushButton#btn_mode_toggle:hover {{
+                        background-color: {T['success']};
+                        color: {T['bg_main']};
+                    }}
                 """)
             else:
                 self.btn_mode_toggle.setText("⚡ Gelişmiş Mod (Geç: Basit ❮)")
                 self.btn_mode_toggle.setToolTip("Şu an Gelişmiş Moddasınız. Sade görünüme dönmek için tıklayın.")
-                self.btn_mode_toggle.setStyleSheet("""
-                    QPushButton#btn_mode_toggle {
-                        background-color: #1f2335;
-                        border: 1px solid #bb9af7;
-                        color: #bb9af7;
+                self.btn_mode_toggle.setStyleSheet(f"""
+                    QPushButton#btn_mode_toggle {{
+                        background-color: {T['bg_panel']};
+                        border: 1px solid {T['color_purple']};
+                        color: {T['color_purple']};
                         font-weight: bold;
                         border-radius: 6px;
                         padding: 4px 10px;
                         font-size: 11px;
-                    }
-                    QPushButton#btn_mode_toggle:hover {
-                        background-color: #bb9af7;
-                        color: #1a1b26;
-                    }
+                    }}
+                    QPushButton#btn_mode_toggle:hover {{
+                        background-color: {T['color_purple']};
+                        color: {T['bg_main']};
+                    }}
                 """)
 
         if hasattr(self, 'act_view_simple') and self.act_view_simple is not None:
@@ -3040,12 +3045,12 @@ class MainWindow(QMainWindow):
         if free_bytes >= 0:
             self.lbl_disk_stat.setText(f"💾 {drive}: {format_size(free_bytes)} Boş")
             if free_bytes < 1024 * 1024 * 1024:  # < 1 GB
-                self.lbl_disk_stat.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 15px;")
+                self.lbl_disk_stat.setStyleSheet(f"color: {T['danger']}; font-weight: bold; margin-left: 15px;")
             else:
-                self.lbl_disk_stat.setStyleSheet("color: #7dcfff; font-weight: bold; margin-left: 15px;")
+                self.lbl_disk_stat.setStyleSheet(f"color: {T['color_cyan']}; font-weight: bold; margin-left: 15px;")
         else:
             self.lbl_disk_stat.setText("💾 Disk: Bilgi alınamadı")
-            self.lbl_disk_stat.setStyleSheet("color: #ff9e64; font-weight: bold; margin-left: 15px;")
+            self.lbl_disk_stat.setStyleSheet(f"color: {T['color_orange']}; font-weight: bold; margin-left: 15px;")
 
     def _show_statistics_dialog(self):
         default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
@@ -3129,15 +3134,15 @@ class MainWindow(QMainWindow):
         # Update status bar
         if not info["enabled"]:
             self.lbl_scheduler_stat.setText("⏱ Zamanlayıcı: Kapalı")
-            self.lbl_scheduler_stat.setStyleSheet("color: #7982a9; font-weight: bold; margin-left: 20px;")
+            self.lbl_scheduler_stat.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold; margin-left: 20px;")
         elif info["is_in_window"]:
             txt = f"⏱ Zamanlayıcı: {info['state_text']} (Kalan: {info['time_remaining_str']})"
             self.lbl_scheduler_stat.setText(txt)
-            self.lbl_scheduler_stat.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 20px;")
+            self.lbl_scheduler_stat.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 20px;")
         else:
             txt = f"⏱ Zamanlayıcı: {info['state_text']} (Kalan: {info['time_remaining_str']})"
             self.lbl_scheduler_stat.setText(txt)
-            self.lbl_scheduler_stat.setStyleSheet("color: #e0af68; font-weight: bold; margin-left: 20px;")
+            self.lbl_scheduler_stat.setStyleSheet(f"color: {T['warning']}; font-weight: bold; margin-left: 20px;")
 
         self.tray.update_scheduler_ui(info["enabled"], info.get("state_text", ""))
 
@@ -3153,13 +3158,13 @@ class MainWindow(QMainWindow):
 
         if not en:
             self.lbl_tb_sched_badge.setText("Kapalı")
-            self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #7982a9; min-width: 60px;")
+            self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['text_secondary']}; min-width: 60px;")
         elif info.get("is_in_window"):
             self.lbl_tb_sched_badge.setText("İndiriliyor")
-            self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #9ece6a; min-width: 60px;")
+            self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['success']}; min-width: 60px;")
         else:
             self.lbl_tb_sched_badge.setText("Beklemede")
-            self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #e0af68; min-width: 60px;")
+            self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['warning']}; min-width: 60px;")
 
     def _handle_scheduler_started(self):
         self.tray.showMessage(

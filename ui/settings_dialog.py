@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from core.database import Database
 from core.site_rules import SiteRulesManager
 from core.post_download import send_webhook_notification
-from ui.styles import ACCENT_COLORS
+from ui.styles import ACCENT_COLORS, T
 
 
 class SiteRuleAddDialog(QDialog):
@@ -45,7 +45,7 @@ class SiteRuleAddDialog(QDialog):
         btn_box = QHBoxLayout()
         btn_box.addStretch()
         btn_ok = QPushButton("Kuralı Kaydet")
-        btn_ok.setStyleSheet("background-color: #7aa2f7; color: #1a1b26; font-weight: bold; padding: 6px 16px;")
+        btn_ok.setStyleSheet(f"background-color: {T['accent']}; color: {T['bg_main']}; font-weight: bold; padding: 6px 16px;")
         btn_ok.clicked.connect(self._on_ok)
         btn_box.addWidget(btn_ok)
 
@@ -96,7 +96,7 @@ class SettingsDialog(QDialog):
         # Üst Arayüz Modu & Sekme Filtresi (Yeni Kullanıcı / Uzman Ayrımı)
         top_bar = QHBoxLayout()
         self.chk_show_advanced_tabs = QCheckBox("Gelişmiş Ayar Sekmelerini Göster (Proxy, Otomasyon & Webhook, Site Kuralları)")
-        self.chk_show_advanced_tabs.setStyleSheet("color: #7aa2f7; font-weight: bold; font-size: 11px;")
+        self.chk_show_advanced_tabs.setStyleSheet(f"color: {T['accent']}; font-weight: bold; font-size: 11px;")
         self.chk_show_advanced_tabs.toggled.connect(self._toggle_advanced_tabs)
         top_bar.addWidget(self.chk_show_advanced_tabs)
         top_bar.addStretch()
@@ -151,7 +151,7 @@ class SettingsDialog(QDialog):
         f_gen.addRow("Aynı İsimde Dosya Varsa (Çakışma):", self.combo_conflict_action)
 
         self.lbl_conflict_hint = QLabel("🔄 Çakışma durumunda dosya 'dosya (1).ext' şeklinde güvenle yeniden adlandırılır.")
-        self.lbl_conflict_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
+        self.lbl_conflict_hint.setStyleSheet(f"color: {T['accent']}; font-size: 11px;")
         self.lbl_conflict_hint.setWordWrap(True)
         f_gen.addRow("", self.lbl_conflict_hint)
 
@@ -172,7 +172,7 @@ class SettingsDialog(QDialog):
 
         self.chk_warn_duplicate = QCheckBox("🛡️ Yinelenen İndirme Uyarısı (Aynı bağlantı veya dosya mevcutsa uyar)")
         self.chk_warn_duplicate.setChecked(True)
-        self.chk_warn_duplicate.setStyleSheet("color: #7aa2f7; font-weight: bold;")
+        self.chk_warn_duplicate.setStyleSheet(f"color: {T['accent']}; font-weight: bold;")
         f_gen.addRow("", self.chk_warn_duplicate)
 
         lay_gen.addWidget(grp_gen)
@@ -215,7 +215,7 @@ class SettingsDialog(QDialog):
         f_proxy = QFormLayout(grp_proxy)
 
         self.chk_proxy_enabled = QCheckBox("Proxy Sunucusu Kullan (HTTP / HTTPS / SOCKS5)")
-        self.chk_proxy_enabled.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.chk_proxy_enabled.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.chk_proxy_enabled.toggled.connect(self._toggle_proxy_fields)
         f_proxy.addRow("", self.chk_proxy_enabled)
 
@@ -247,7 +247,7 @@ class SettingsDialog(QDialog):
 
         lbl_proxy_hint = QLabel("💡 Not: Proxy ayarları etkinleştirildiğinde tüm indirmeler ve medya çözümlemeleri bu vekil sunucu üzerinden yönlendirilir.")
         lbl_proxy_hint.setWordWrap(True)
-        lbl_proxy_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
+        lbl_proxy_hint.setStyleSheet(f"color: {T['accent']}; font-size: 11px;")
         lay_proxy.addWidget(lbl_proxy_hint)
         lay_proxy.addStretch()
         self.tabs.addTab(tab_proxy, "🌐 Ağ & Proxy")
@@ -265,6 +265,7 @@ class SettingsDialog(QDialog):
         self.combo_theme = QComboBox()
         self.combo_theme.addItem("🌙 Koyu Tema (Tokyo Night Dark)", "dark")
         self.combo_theme.addItem("☀️ Aydınlık Tema (Modern Fluent Light)", "light")
+        self.combo_theme.addItem("🖥 Sistem Temasını İzle (Windows ayarı)", "system")
         f_theme.addRow("Arayüz Teması:", self.combo_theme)
 
         self.combo_accent = QComboBox()
@@ -293,7 +294,7 @@ class SettingsDialog(QDialog):
 
         lbl_theme_hint = QLabel("💡 Kaydet butonuna tıkladığınızda seçilen mod, tema ve vurgu rengi RipSync pencerelerine anında uygulanır.")
         lbl_theme_hint.setWordWrap(True)
-        lbl_theme_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
+        lbl_theme_hint.setStyleSheet(f"color: {T['accent']}; font-size: 11px;")
         lay_theme.addWidget(lbl_theme_hint)
         lay_theme.addStretch()
 
@@ -310,7 +311,7 @@ class SettingsDialog(QDialog):
         f_speed = QFormLayout(grp_speed)
 
         self.chk_speed_limit = QCheckBox("Genel Hız Sınırını Etkinleştir (Tek Tıkla IDM Modu)")
-        self.chk_speed_limit.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.chk_speed_limit.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.chk_speed_limit.toggled.connect(self._toggle_speed_limit)
         f_speed.addRow("", self.chk_speed_limit)
 
@@ -336,7 +337,7 @@ class SettingsDialog(QDialog):
 
         preset_row = QHBoxLayout()
         lbl_p = QLabel("Hızlı Seçim:")
-        lbl_p.setStyleSheet("color: #7982a9; font-size: 11px;")
+        lbl_p.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         preset_row.addWidget(lbl_p)
 
         self.btn_presets = []
@@ -373,17 +374,17 @@ class SettingsDialog(QDialog):
 
         self.chk_keep_awake = QCheckBox("🌙 Aktif indirme varken Windows'un uyku moduna geçmesini engelle (Keep-Awake)")
         self.chk_keep_awake.setChecked(True)
-        self.chk_keep_awake.setStyleSheet("color: #7aa2f7; font-weight: bold;")
+        self.chk_keep_awake.setStyleSheet(f"color: {T['accent']}; font-weight: bold;")
         f_power.addRow("", self.chk_keep_awake)
 
         self.chk_pause_metered = QCheckBox("📶 Tarifeli Bağlantıda (Mobil Veri / Hotspot) indirmeleri otomatik duraklat")
         self.chk_pause_metered.setChecked(True)
-        self.chk_pause_metered.setStyleSheet("color: #7dcfff; font-weight: bold;")
+        self.chk_pause_metered.setStyleSheet(f"color: {T['color_cyan']}; font-weight: bold;")
         f_power.addRow("", self.chk_pause_metered)
 
         self.chk_suspend_if_active = QCheckBox("🛡️ Kullanıcı aktif kullanımdayken kapatma / uyku işlemini otomatik askıya al")
         self.chk_suspend_if_active.setChecked(True)
-        self.chk_suspend_if_active.setStyleSheet("color: #9ece6a; font-weight: bold;")
+        self.chk_suspend_if_active.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
         f_power.addRow("", self.chk_suspend_if_active)
 
         idle_box = QHBoxLayout()
@@ -393,7 +394,7 @@ class SettingsDialog(QDialog):
         self.spin_idle_threshold.setSuffix(" sn")
         self.spin_idle_threshold.setFixedWidth(80)
         lbl_idle_desc = QLabel("(Son girdi bu süreden kısaysa sistem aktif kabul edilir)")
-        lbl_idle_desc.setStyleSheet("color: #7982a9; font-size: 11px;")
+        lbl_idle_desc.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         idle_box.addWidget(self.spin_idle_threshold)
         idle_box.addWidget(lbl_idle_desc)
         idle_box.addStretch()
@@ -425,7 +426,7 @@ class SettingsDialog(QDialog):
         f_integ.addRow("", self.chk_clipboard)
 
         self.lbl_clip_privacy = QLabel("🔒 Gizlilik Koruması: Şifreler, kart numaraları ve özel metinler taranmaz veya bellekte tutulmaz.")
-        self.lbl_clip_privacy.setStyleSheet("color: #718096; font-size: 11px;")
+        self.lbl_clip_privacy.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px;")
         f_integ.addRow("", self.lbl_clip_privacy)
 
         self.chk_clip_only_media = QCheckBox("🎯 Yalnızca doğrudan medya ve dosya uzantılarını yakala (Genel sayfaları yoksay)")
@@ -453,7 +454,7 @@ class SettingsDialog(QDialog):
         token_row = QHBoxLayout()
         self.edit_bridge_token = QLineEdit()
         self.edit_bridge_token.setReadOnly(True)
-        self.edit_bridge_token.setStyleSheet("color: #7aa2f7; font-family: monospace;")
+        self.edit_bridge_token.setStyleSheet(f"color: {T['accent']}; font-family: monospace;")
         btn_copy_token = QPushButton("📋 Kopyala")
         btn_copy_token.clicked.connect(self._copy_bridge_token)
         btn_regen_token = QPushButton("🔄 Yeni Üret")
@@ -505,7 +506,7 @@ class SettingsDialog(QDialog):
         f_cmd.setSpacing(10)
 
         self.chk_command_enabled = QCheckBox("İndirme bittiğinde özel komut veya betik çalıştır")
-        self.chk_command_enabled.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.chk_command_enabled.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.chk_command_enabled.toggled.connect(lambda en: self.edit_command.setEnabled(en))
         f_cmd.addRow("", self.chk_command_enabled)
 
@@ -520,7 +521,7 @@ class SettingsDialog(QDialog):
                               " • {filesize} ➔ Okunabilir dosya boyutu (örn: 24.5 MB)\n"
                               " • {category} ➔ Dosya kategorisi (Video, Belgeler vb.)\n"
                               " • {url} ➔ İndirilen kaynak web adresi")
-        lbl_cmd_hint.setStyleSheet("color: #7982a9; font-size: 11px; margin-top: 4px;")
+        lbl_cmd_hint.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px; margin-top: 4px;")
         f_cmd.addRow("", lbl_cmd_hint)
         lay_auto.addWidget(grp_cmd)
 
@@ -530,7 +531,7 @@ class SettingsDialog(QDialog):
         f_hook.setSpacing(10)
 
         self.chk_webhook_enabled = QCheckBox("İndirme bittiğinde Webhook bildirimi gönder")
-        self.chk_webhook_enabled.setStyleSheet("font-weight: bold; color: #9ece6a;")
+        self.chk_webhook_enabled.setStyleSheet(f"font-weight: bold; color: {T['success']};")
         self.chk_webhook_enabled.toggled.connect(self._toggle_webhook_fields)
         f_hook.addRow("", self.chk_webhook_enabled)
 
@@ -548,7 +549,7 @@ class SettingsDialog(QDialog):
         f_hook.addRow("Webhook URL:", hook_row)
 
         self.chk_webhook_include_filepath = QCheckBox("Tam yerel dosya yolunu ({filepath}) bildirim verisine dahil et")
-        self.chk_webhook_include_filepath.setStyleSheet("color: #c0caf5;")
+        self.chk_webhook_include_filepath.setStyleSheet(f"color: {T['text_primary']};")
         self.chk_webhook_include_filepath.setEnabled(False)
         self.chk_webhook_include_filepath.toggled.connect(self._on_include_filepath_toggled)
         f_hook.addRow("", self.chk_webhook_include_filepath)
@@ -556,14 +557,14 @@ class SettingsDialog(QDialog):
         # Güvenlik ve Gizlilik Uyarısı
         warning_box = QFrame()
         warning_box.setStyleSheet(
-            "QFrame { background-color: rgba(224, 175, 104, 0.12); border: 1px solid #e0af68; border-radius: 6px; padding: 10px; }"
+            f"QFrame {{ background-color: rgba(224, 175, 104, 0.12); border: 1px solid {T['warning']}; border-radius: 6px; padding: 10px; }}"
         )
         lay_warn = QVBoxLayout(warning_box)
         lay_warn.setContentsMargins(8, 8, 8, 8)
         lay_warn.setSpacing(6)
 
         lbl_warn_title = QLabel("⚠️ Gizlilik & Veri Güvenliği Uyarısı:")
-        lbl_warn_title.setStyleSheet("color: #e0af68; font-weight: bold; font-size: 11px;")
+        lbl_warn_title.setStyleSheet(f"color: {T['warning']}; font-weight: bold; font-size: 11px;")
         lay_warn.addWidget(lbl_warn_title)
 
         lbl_warn_text = QLabel(
@@ -573,7 +574,7 @@ class SettingsDialog(QDialog):
             "tam dosya yolu ({filepath}) varsayılan olarak gönderilmez."
         )
         lbl_warn_text.setWordWrap(True)
-        lbl_warn_text.setStyleSheet("color: #c0caf5; font-size: 11px; line-height: 1.4;")
+        lbl_warn_text.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px; line-height: 1.4;")
         lay_warn.addWidget(lbl_warn_text)
 
         f_hook.addRow("", warning_box)
@@ -590,7 +591,7 @@ class SettingsDialog(QDialog):
         lay_sr.setSpacing(10)
 
         lbl_sr_info = QLabel("Belirli web sitelerinden indirilen dosyaları otomatik olarak istediğiniz klasöre kaydedin:")
-        lbl_sr_info.setStyleSheet("color: #c0caf5; font-size: 12px; font-weight: bold;")
+        lbl_sr_info.setStyleSheet(f"color: {T['text_primary']}; font-size: 12px; font-weight: bold;")
         lay_sr.addWidget(lbl_sr_info)
 
         self.tbl_site_rules = QTableWidget()
@@ -600,12 +601,12 @@ class SettingsDialog(QDialog):
         self.tbl_site_rules.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_site_rules.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_site_rules.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.tbl_site_rules.setStyleSheet("QTableWidget { background-color: #1a1b26; border: 1px solid #3b4261; border-radius: 6px; }")
+        self.tbl_site_rules.setStyleSheet(f"QTableWidget {{ background-color: {T['bg_main']}; border: 1px solid {T['border']}; border-radius: 6px; }}")
         lay_sr.addWidget(self.tbl_site_rules, stretch=1)
 
         sr_act_row = QHBoxLayout()
         btn_add_rule = QPushButton("➕ Yeni Kural Ekle...")
-        btn_add_rule.setStyleSheet("background-color: #7aa2f7; color: #1a1b26; font-weight: bold; padding: 6px 14px;")
+        btn_add_rule.setStyleSheet(f"background-color: {T['accent']}; color: {T['bg_main']}; font-weight: bold; padding: 6px 14px;")
         btn_add_rule.clicked.connect(self._add_site_rule)
         sr_act_row.addWidget(btn_add_rule)
 
@@ -923,13 +924,13 @@ class SettingsDialog(QDialog):
         act = self.combo_conflict_action.currentData()
         if act == "overwrite":
             self.lbl_conflict_hint.setText("⚠️ 'Üzerine Yaz' seçildiğinde veri kaybını önlemek için indirme öncesinde onay istenir.")
-            self.lbl_conflict_hint.setStyleSheet("color: #f7768e; font-size: 11px; font-weight: bold;")
+            self.lbl_conflict_hint.setStyleSheet(f"color: {T['danger']}; font-size: 11px; font-weight: bold;")
         elif act == "skip":
             self.lbl_conflict_hint.setText("⏭️ Aynı isimde dosya varsa indirme işlemi atlanır.")
-            self.lbl_conflict_hint.setStyleSheet("color: #ff9e64; font-size: 11px;")
+            self.lbl_conflict_hint.setStyleSheet(f"color: {T['color_orange']}; font-size: 11px;")
         else:
             self.lbl_conflict_hint.setText("🔄 Çakışma durumunda dosya 'dosya (1).ext' şeklinde güvenle yeniden adlandırılır.")
-            self.lbl_conflict_hint.setStyleSheet("color: #7aa2f7; font-size: 11px;")
+            self.lbl_conflict_hint.setStyleSheet(f"color: {T['accent']}; font-size: 11px;")
 
     def _save_settings(self):
         self.db.set_setting("default_dir", self.edit_default_dir.text().strip())
@@ -1101,14 +1102,14 @@ class SettingsDialog(QDialog):
         parent_srv = getattr(self.parent(), "bridge_server", None)
         if parent_srv and parent_srv.is_running and parent_srv.actual_port == target:
             self.lbl_port_check.setText("🟢 Bu Port Zaten Aktif")
-            self.lbl_port_check.setStyleSheet("color: #9ece6a; font-weight: bold; font-size: 11px;")
+            self.lbl_port_check.setStyleSheet(f"color: {T['success']}; font-weight: bold; font-size: 11px;")
             return
 
         if is_port_available("127.0.0.1", target):
             self.lbl_port_check.setText("🟢 Port Müsait")
-            self.lbl_port_check.setStyleSheet("color: #9ece6a; font-weight: bold; font-size: 11px;")
+            self.lbl_port_check.setStyleSheet(f"color: {T['success']}; font-weight: bold; font-size: 11px;")
         else:
             self.lbl_port_check.setText("🔴 Port Meşgul (Çakışma)")
-            self.lbl_port_check.setStyleSheet("color: #f7768e; font-weight: bold; font-size: 11px;")
+            self.lbl_port_check.setStyleSheet(f"color: {T['danger']}; font-weight: bold; font-size: 11px;")
 
 
