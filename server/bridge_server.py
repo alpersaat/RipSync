@@ -40,6 +40,9 @@ def write_extension_config(token: str, port: int = 28710) -> Optional[str]:
     """
     Writes a config.json file inside the unpacked extension directory
     containing the bridge port and authorization token for zero-touch pairing.
+
+    Test ortamında (PYTEST_CURRENT_TEST) gerçek eklenti dizinini bozmamak için
+    yazma atlanır; testler kendi tmp dizinini geçer.
     """
     try:
         from core.paths import get_extension_dir
