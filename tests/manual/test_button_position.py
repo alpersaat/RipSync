@@ -18,7 +18,7 @@ try:
 except ImportError:
     sync_playwright = None
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXT_DIR = os.path.join(ROOT, "extension")
 PORT = 29911
 BRIDGE_PORT = 28710

@@ -8,7 +8,7 @@ try:
 except ImportError:
     sync_playwright = None
 
-EXT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extension")
+EXT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "extension")
 
 INFO = """() => {
   const vids = [...document.querySelectorAll('video')].map(v => {const r=v.getBoundingClientRect();
