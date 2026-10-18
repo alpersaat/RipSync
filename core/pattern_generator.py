@@ -1,5 +1,5 @@
 import re
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 
 MAX_PATTERN_GENERATED_URLS = 1000
 
