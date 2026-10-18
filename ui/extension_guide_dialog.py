@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QApplication, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QPalette
+from PyQt6.QtGui import QFont, QColor
 
 from core.paths import get_extension_dir, show_in_explorer
 from core.extension_installer import (
