@@ -7,13 +7,14 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QToolBar, QPushButton,
     QLabel, QProgressBar, QMenu, QMessageBox, QStatusBar,
     QApplication, QSystemTrayIcon, QSlider, QCheckBox, QComboBox, QSpinBox,
-    QLineEdit, QFileDialog, QInputDialog, QToolButton, QSizePolicy, QDialog
+    QLineEdit, QFileDialog, QInputDialog, QToolButton, QSizePolicy, QDialog,
+    QStackedWidget, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData, QSettings, QPoint, QRect, QSize
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut, QDrag, QDragEnterEvent, QDropEvent
 
 from datetime import datetime
-from ui.styles import DARK_THEME, get_theme_stylesheet, format_size, format_progress_size, format_speed, format_eta
+from ui.styles import DARK_THEME, get_theme_stylesheet, format_size, format_progress_size, format_speed, format_eta, T
 from ui.add_download_dialog import AddDownloadDialog
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
@@ -66,11 +67,156 @@ class NumericTableWidgetItem(QTableWidgetItem):
 
 
 class DownloadsTableWidget(QTableWidget):
-    """Custom table widget supporting drag & drop outward (dragging completed files to Explorer/apps)."""
+    """Custom table widget supporting drag & drop outward (dragging completed files to Explorer/apps)
+    and hover quick actions (pause/open/reveal) at row level."""
+
+    HOVER_ACTIONS = ("toggle", "open", "folder")
+
     def __init__(self, parent_window=None, parent=None):
         super().__init__(parent)
         self.parent_window = parent_window
         self.setDragEnabled(True)
+        self.setMouseTracking(True)
+        self._hover_row = -1
+        self._hover_bar: QFrame = None
+        self._hover_buttons: dict = {}
+
+    # ---- Satır üstü hızlı eylemler ------------------------------------------
+    def _ensure_hover_bar(self):
+        if self._hover_bar is None:
+            bar = QFrame(self.viewport())
+            bar.setObjectName("row_hover_bar")
+            bar.setStyleSheet(
+                f"QFrame#row_hover_bar {{ background-color: {T['bg_card']};"
+                f" border: 1px solid {T['border']}; border-radius: 6px; }}"
+                "QPushButton { background: transparent; border: none; padding: 2px 5px; font-size: 13px; }"
+                f"QPushButton:hover {{ background-color: {T['bg_hover']}; border-radius: 4px; }}"
+            )
+            lay = QHBoxLayout(bar)
+            lay.setContentsMargins(2, 0, 2, 0)
+            lay.setSpacing(1)
+            self._btn_toggle = QPushButton("⏯")
+            self._btn_toggle.setToolTip("Duraklat / Devam Ettir")
+            self._btn_open = QPushButton("📂")
+            self._btn_open.setToolTip("Dosyayı Aç")
+            self._btn_folder = QPushButton("📁")
+            self._btn_folder.setToolTip("Klasörde Göster")
+            for btn, act in (
+                (self._btn_toggle, self._act_toggle),
+                (self._btn_open, self._act_open),
+                (self._btn_folder, self._act_folder),
+            ):
+                btn.setFixedSize(26, 22)
+                btn.clicked.connect(act)
+                lay.addWidget(btn)
+            self._hover_bar = bar
+            bar.hide()
+
+    def _row_download(self, row):
+        if self.parent_window is None or row < 0:
+            return None
+        item = self.item(row, 0)
+        if not item:
+            return None
+        did = item.data(Qt.ItemDataRole.UserRole)
+        try:
+            return self.parent_window.queue_mgr.get_download(did), did
+        except Exception:
+            return None, None
+
+    def _act_toggle(self):
+        rec, did = self._row_download(self._hover_row)
+        if not rec or not did:
+            return
+        qm = self.parent_window.queue_mgr
+        status = rec.get("status")
+        if status == "Downloading":
+            qm.pause_download(did)
+        elif status in ("Paused", "Queued", "Error"):
+            qm.resume_download(did) if hasattr(qm, "resume_download") else qm.start_download(did)
+        else:
+            qm.start_download(did)
+
+    def _act_open(self):
+        rec, did = self._row_download(self._row_download_row_or_latest())
+        if not rec:
+            return
+        spath = rec.get("save_path") or ""
+        if os.path.exists(spath):
+            try:
+                os.startfile(spath)  # noqa: S606 (platform: Windows)
+            except Exception:
+                pass
+
+    def _row_download_row_or_latest(self):
+        # Butona basıldığında fare satırı değişmiş olabilir; en son görünen satırı kullan.
+        return self._hover_row
+
+    def _act_folder(self):
+        rec, did = self._row_download(self._hover_row)
+        if not rec:
+            return
+        spath = rec.get("save_path") or ""
+        try:
+            from core.paths import show_in_explorer
+            show_in_explorer(spath if os.path.exists(spath) else os.path.dirname(spath) or spath)
+        except Exception:
+            pass
+
+    def _update_hover_bar(self, row: int):
+        self._ensure_hover_bar()
+        rec, did = self._row_download(row)
+        if rec is None and did is None:
+            self._hover_bar.hide()
+            self._hover_row = -1
+            return
+        self._hover_row = row
+        # Toggle düğmesinin duruma uygun simgesi
+        status = rec.get("status")
+        if status == "Downloading":
+            self._btn_toggle.setText("⏸")
+            self._btn_toggle.setToolTip("Duraklat")
+        elif status in ("Paused", "Queued", "Error", "Retrying"):
+            self._btn_toggle.setText("▶")
+            self._btn_toggle.setToolTip("Devam Ettir")
+        else:
+            self._btn_toggle.setText("▶")
+            self._btn_toggle.setToolTip("Başlat")
+        # Tamamlanan indirmede aç klasik; diğerlerinde gizle
+        completed = status == "Completed" and os.path.exists(rec.get("save_path") or "")
+        self._btn_open.setVisible(completed)
+        self._btn_folder.setVisible(completed or status in ("Completed", "Cancelled"))
+        # Konum: satırın sağ üstü
+        row_y = self.rowViewportPosition(row)
+        col_w = max(0, self.columnWidth(self.columnCount() - 1))
+        w = self._hover_bar.sizeHint().width()
+        h = max(26, self.rowHeight(row) + 2)
+        vw = self.viewport().width()
+        x = vw - w - 12
+        self._hover_bar.setGeometry(max(0, x), max(0, row_y + (self.rowHeight(row) - h) // 2), w, h)
+        self._hover_bar.raise_()
+        self._hover_bar.show()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position().toPoint()
+        row = self.rowAt(pos.y())
+        if row >= 0 and (self._hover_bar is None or row != self._hover_row
+                         or not self._hover_bar.geometry().contains(self._hover_bar.mapFromGlobal(event.globalPosition().toPoint()))):
+            self._update_hover_bar(row)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        if self._hover_bar is not None:
+            self._hover_bar.hide()
+        self._hover_row = -1
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if self._hover_bar is not None and self._hover_bar.isVisible():
+            vp_pos = self._hover_bar.mapFromGlobal(event.globalPosition().toPoint())
+            if not self._hover_bar.geometry().contains(vp_pos):
+                self._hover_bar.hide()
+        super().mousePressEvent(event)
 
     def startDrag(self, supportedActions):
         selected_rows = set(item.row() for item in self.selectedItems())
@@ -89,10 +235,83 @@ class DownloadsTableWidget(QTableWidget):
             drag = QDrag(self)
             mime = QMimeData()
             mime.setUrls(urls)
+            ids = self._selected_download_ids()
+            if ids:
+                mime.setData("application/x-ripsync-download-ids", "\n".join(ids).encode("utf-8"))
             drag.setMimeData(mime)
             drag.exec(Qt.DropAction.CopyAction)
         else:
-            super().startDrag(supportedActions)
+            ids = self._selected_download_ids()
+            if ids:
+                drag = QDrag(self)
+                mime = QMimeData()
+                mime.setData("application/x-ripsync-download-ids", "\n".join(ids).encode("utf-8"))
+                drag.setMimeData(mime)
+                drag.exec(Qt.DropAction.MoveAction)
+            else:
+                super().startDrag(supportedActions)
+
+    def _selected_download_ids(self) -> list:
+        ids = []
+        for r in set(item.row() for item in self.selectedItems()):
+            item = self.item(r, 0)
+            if item:
+                did = item.data(Qt.ItemDataRole.UserRole)
+                if did and str(did) not in ("__ADD_QUEUE__",):
+                    ids.append(str(did))
+        return ids
+
+
+class CategoriesTreeWidget(QTreeWidget):
+    """Sol panel ağacı: tablo satırlarını kuyruğa sürükleyip bırakmayı destekler."""
+
+    MIME_IDS = "application/x-ripsync-download-ids"
+
+    def __init__(self, parent_window=None, parent=None):
+        super().__init__(parent)
+        self.parent_window = parent_window
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(self.MIME_IDS):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat(self.MIME_IDS):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _queue_id_at(self, event):
+        item = self.itemAt(event.position().toPoint())
+        if item is None:
+            return None
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, str):
+            if data.startswith("queue:"):
+                return data.split(":", 1)[1]
+            if self.root_queues_item is not None and item == self.root_queues_item:
+                return "default"
+        return None
+
+    def dropEvent(self, event):
+        if not event.mimeData().hasFormat(self.MIME_IDS) or self.parent_window is None:
+            event.ignore()
+            return
+        try:
+            ids = bytes(event.mimeData().data(self.MIME_IDS)).decode("utf-8").splitlines()
+            ids = [x for x in (s.strip() for s in ids) if x]
+        except Exception:
+            ids = []
+        qid = self._queue_id_at(event)
+        if ids and qid:
+            event.acceptProposedAction()
+            self.parent_window._move_downloads_to_queue(ids, qid)
+        else:
+            event.ignore()
 
 
 class MainWindow(QMainWindow):
@@ -120,8 +339,11 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("RipSync - Internet Download Manager")
         self.setWindowIcon(create_default_icon())
-        thm_cfg = self.db.get_theme_settings()
-        self.setStyleSheet(get_theme_stylesheet(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue")))
+        from ui import styles as _styles
+        _styles.set_database(db)
+        thm_cfg = db.get_theme_settings()
+        _styles.refresh_tokens(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue"))
+        self.setStyleSheet(_styles.get_app_stylesheet())
 
         self.current_category = "All"
         self.current_tag: Optional[str] = None
@@ -185,7 +407,97 @@ class MainWindow(QMainWindow):
         # Check First-Run / Onboarding Tour & Apply UI Mode
         self.ui_mode = self.db.get_ui_mode()
         self.apply_ui_mode(self.ui_mode)
+
+        # Akıllı pencere boyutu & konumu (QSettings ile kalıcı)
+        self._init_window_geometry()
+
         QTimer.singleShot(400, self._check_first_run_onboarding)
+
+    # ---- PencereBoyutu/Konumu (QSettings) ------------------------------------
+    def _init_window_geometry(self):
+        """Ekran geometrisine göre akıllı varsayılan boyut uygular; önceki oturumdan
+        kayıtlı boyut/konum varsa onu geri yükler, yoksa pencereyi merkezler."""
+        self.setMinimumSize(980, 600)
+
+        self._geom_timer = QTimer(self)
+        self._geom_timer.setSingleShot(True)
+        self._geom_timer.setInterval(500)
+        self._geom_timer.timeout.connect(self._save_geometry)
+
+        screen = self.screen() or QApplication.primaryScreen()
+        avail = screen.availableGeometry()
+        default_w = min(1280, int(avail.width() * 0.75))
+        default_h = min(800, int(avail.height() * 0.8))
+
+        settings = QSettings()
+        try:
+            w = int(settings.value("geometry/width", default_w))
+            h = int(settings.value("geometry/height", default_h))
+        except (TypeError, ValueError):
+            w, h = default_w, default_h
+        w = max(980, min(w, avail.width()))
+        h = max(600, min(h, avail.height()))
+        self.resize(w, h)
+
+        valid_pos = False
+        x = settings.value("geometry/x")
+        y = settings.value("geometry/y")
+        if x is not None and y is not None:
+            try:
+                pos = QPoint(int(x), int(y))
+            except (TypeError, ValueError):
+                pos = None
+            if pos is not None:
+                union = QRect()
+                for scr in QApplication.screens():
+                    union = union.united(scr.availableGeometry())
+                if QRect(pos, QSize(w, h)).intersects(union):
+                    self.move(pos)
+                    valid_pos = True
+        if not valid_pos:
+            fg = self.frameGeometry()
+            fg.moveCenter(avail.center())
+            self.move(fg.topLeft())
+
+    def _save_geometry(self):
+        """Boyut ve konumu QSettings'e yazar. Küçültülmüş ya da gizli
+        pencerede geçersiz değer yazılmasını engeller."""
+        if not self.isVisible() or self.isMinimized():
+            return
+        geometry = self.geometry()
+        QSettings().setValue("geometry/width", geometry.width())
+        QSettings().setValue("geometry/height", geometry.height())
+        QSettings().setValue("geometry/x", geometry.x())
+        QSettings().setValue("geometry/y", geometry.y())
+
+    def _update_toolbar_break(self):
+        """Pencere genişliğine göre ikincil şeridi ilk satırda tutar veya
+        ikinci satıra alır (kırılım: toolbar_break_width ≈ 1100px)."""
+        toolbar2 = getattr(self, "toolbar2", None)
+        if toolbar2 is None:
+            return
+        broken = self.width() < self.toolbar_break_width
+        if broken == self._toolbar_broken:
+            return
+        spacer = getattr(self, "tb_spacer", None)
+        if spacer is not None:
+            spacer.setVisible(not broken)
+        if broken:
+            self.insertToolBarBreak(toolbar2)
+        else:
+            self.removeToolBarBreak(toolbar2)
+        self._toolbar_broken = broken
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_geom_timer"):
+            self._geom_timer.start()
+        self._update_toolbar_break()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if hasattr(self, "_geom_timer"):
+            self._geom_timer.start()
 
     def _init_menubar(self):
         menubar = self.menuBar()
@@ -293,88 +605,111 @@ class MainWindow(QMainWindow):
         # Menu Bar
         self._init_menubar()
 
-        # Toolbar
+        # Toolbar — kalıcı ve sık kullanılanlar:
+        # ➕ URL Ekle | ▶/⏸ Başlat-Duraklat | 🗑 Sil | ⚙ Ayarlar | ⋯ Daha fazla
         toolbar = QToolBar("Ana Araç Çubuğu")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
         self.toolbar = toolbar
 
-        self.adv_toolbar_separators = []
-
         self.act_add = QAction("➕ URL Ekle", self)
         self.act_add.triggered.connect(self._show_add_dialog)
         toolbar.addAction(self.act_add)
 
-        self.act_playlist = QAction("📑 Oynatma Listesi İndir", self)
-        self.act_playlist.setToolTip("YouTube Çalma Listesindeki Videoları Toplu Tara ve İndir")
-        self.act_playlist.triggered.connect(lambda: self._show_playlist_dialog())
-        toolbar.addAction(self.act_playlist)
+        toolbar.addSeparator()
 
-        self.act_batch_add = QAction("📋 Toplu Link Ekle", self)
-        self.act_batch_add.setToolTip("Birden fazla web bağlantısını tek seferde toplu olarak ekle (Ctrl+B)")
-        self.act_batch_add.triggered.connect(lambda: self._show_batch_add_dialog())
-        toolbar.addAction(self.act_batch_add)
-
-        self.sep_basic_1 = toolbar.addSeparator()
-
-        self.act_start = QAction("▶ Başlat", self)
-        self.act_start.triggered.connect(self._start_selected)
-        toolbar.addAction(self.act_start)
-
-        self.act_pause = QAction("⏸ Duraklat", self)
-        self.act_pause.triggered.connect(self._pause_selected)
-        toolbar.addAction(self.act_pause)
-
-        self.act_stop = QAction("⏹ İptal", self)
-        self.act_stop.triggered.connect(self._cancel_selected)
-        toolbar.addAction(self.act_stop)
+        # Başlat / Duraklat tek toggle (seçime göre davranır)
+        self.act_toggle_run = QAction("▶ Başlat", self)
+        self.act_toggle_run.setToolTip("Seçili indirmeleri başlatır veya duraklatır")
+        self.act_toggle_run.triggered.connect(self._on_toggle_run_triggered)
+        toolbar.addAction(self.act_toggle_run)
 
         self.act_delete = QAction("🗑 Sil", self)
         self.act_delete.setToolTip("Listeden Kaldır (Delete)\nVarsayılan: Dosya diskte korunur, listeden silinir.")
         self.act_delete.triggered.connect(self._delete_selected)
         toolbar.addAction(self.act_delete)
 
-        self.act_delete_file = QAction("💥 Dosyayla Sil", self)
-        self.act_delete_file.setToolTip("Dosyayla Birlikte Sil (Shift+Delete)\nİndirme kaydını ve dosyasını kalıcı olarak siler.")
-        self.act_delete_file.triggered.connect(self._delete_selected_with_files)
-        toolbar.addAction(self.act_delete_file)
-
-        self.sep_basic_2 = toolbar.addSeparator()
-
-        self.act_open_file = QAction("📂 Dosyayı Aç", self)
-        self.act_open_file.triggered.connect(self._open_selected_file)
-        toolbar.addAction(self.act_open_file)
-
-        self.act_open_folder = QAction("📁 Klasörde Göster", self)
-        self.act_open_folder.triggered.connect(self._open_selected_folder)
-        toolbar.addAction(self.act_open_folder)
-
-        sep_q = toolbar.addSeparator()
-        self.adv_toolbar_separators.append(sep_q)
-
-        self.act_start_queue = QAction("⚡ Kuyruğu Başlat", self)
-        self.act_start_queue.triggered.connect(self._on_start_all)
-        toolbar.addAction(self.act_start_queue)
-
-        self.act_pause_all = QAction("⏸ Tümünü Durdur", self)
-        self.act_pause_all.triggered.connect(self._on_pause_all)
-        toolbar.addAction(self.act_pause_all)
-
-        sep_sched = toolbar.addSeparator()
-        self.adv_toolbar_separators.append(sep_sched)
-
-        self.act_scheduler = QAction("⏱ Zamanlayıcı", self)
-        self.act_scheduler.setToolTip("Gece İndirmesi ve Kuyruk Planlama Penceresini Aç")
-        self.act_scheduler.triggered.connect(self._show_scheduler_dialog)
-        toolbar.addAction(self.act_scheduler)
-
-        self.sep_basic_3 = toolbar.addSeparator()
+        toolbar.addSeparator()
 
         self.act_settings = QAction("⚙ Ayarlar", self)
         self.act_settings.triggered.connect(self._show_settings_dialog)
         toolbar.addAction(self.act_settings)
 
-        # Eklenti Menülü Buton (Doğrudan Klasör Seçme, Kopyalama, Otomatik Kurulum ve Rehber)
+        # ---- Daha fazla (⋯): ikincil ve gelişmiş eylemler ----------------
+        # Bu eylemler artık araç çubuğunda tek satırda yığılmaz; hem menüde
+        # hem kısayollarla erişilebilir kalır (Basit modda hiçbir işlev kaybolmaz).
+        self.act_playlist = QAction("📑 Oynatma Listesi İndir", self)
+        self.act_playlist.setToolTip("YouTube Çalma Listesindeki Videoları Toplu Tara ve İndir")
+        self.act_playlist.triggered.connect(lambda: self._show_playlist_dialog())
+
+        self.act_batch_add = QAction("📋 Toplu Link Ekle", self)
+        self.act_batch_add.setToolTip("Birden fazla web bağlantısını tek seferde toplu olarak ekle (Ctrl+B)")
+        self.act_batch_add.triggered.connect(lambda: self._show_batch_add_dialog())
+
+        self.act_start_queue = QAction("⚡ Kuyruğu Başlat", self)
+        self.act_start_queue.triggered.connect(self._on_start_all)
+
+        self.act_pause_all = QAction("⏸ Tümünü Durdur", self)
+        self.act_pause_all.triggered.connect(self._on_pause_all)
+
+        self.act_scheduler = QAction("⏱ Zamanlayıcı", self)
+        self.act_scheduler.setToolTip("Gece İndirmesi ve Kuyruk Planlama Penceresini Aç")
+        self.act_scheduler.triggered.connect(self._show_scheduler_dialog)
+
+        self.act_statistics = QAction("📊 İstatistikler", self)
+        self.act_statistics.setToolTip("İndirme İstatistikleri ve Ağ Trafiği Raporunu Aç")
+        self.act_statistics.triggered.connect(self._show_statistics_dialog)
+
+        self.act_clean_missing = QAction("🧹 Eksik Dosyaları Temizle", self)
+        self.act_clean_missing.setToolTip("Diskten silinmiş veya taşınmış tamamlanmış indirmeleri listeden ayıkla")
+        self.act_clean_missing.triggered.connect(self._clean_missing_files)
+
+        self.act_open_file = QAction("📂 Dosyayı Aç", self)
+        self.act_open_file.triggered.connect(self._open_selected_file)
+
+        self.act_open_folder = QAction("📁 Klasörde Göster", self)
+        self.act_open_folder.triggered.connect(self._open_selected_folder)
+
+        self.act_extension = QAction("🌐 Eklenti", self)
+        self.act_extension.setToolTip("Chrome / Edge Tarayıcı Eklentisi Kurulum Kılavuzu")
+        self.act_extension.triggered.connect(self._show_extension_guide)
+
+        self.act_delete_file = QAction("💥 Dosyayla Sil", self)
+        self.act_delete_file.setToolTip("Dosyayla Birlikte Sil (Shift+Delete)\nİndirme kaydını ve dosyasını kalıcı olarak siler.")
+        self.act_delete_file.triggered.connect(self._delete_selected_with_files)
+
+        self.act_stop = QAction("⏹ Seçilenleri İptal Et", self)
+        self.act_stop.triggered.connect(self._cancel_selected)
+
+        self.menu_more = QMenu(self)
+        self.menu_more.addAction(self.act_playlist)
+        self.menu_more.addAction(self.act_batch_add)
+        self.menu_more.addSeparator()
+        self.menu_more.addAction(self.act_start_queue)
+        self.menu_more.addAction(self.act_pause_all)
+        self.menu_more.addSeparator()
+        self.menu_more.addAction(self.act_scheduler)
+        self.menu_more.addAction(self.act_statistics)
+        self.menu_more.addAction(self.act_clean_missing)
+        self.menu_more.addSeparator()
+        self.menu_more.addAction(self.act_open_file)
+        self.menu_more.addAction(self.act_open_folder)
+        self.menu_more.addSeparator()
+        self.menu_more.addAction(self.act_extension)
+        self.menu_more.addAction(self.act_delete_file)
+        self.menu_more.addSeparator()
+        self.menu_more.addAction(self.act_stop)
+
+        btn_more = QToolButton(self)
+        btn_more.setText("⋯ Daha Fazla")
+        btn_more.setToolTip("Diğer tüm araçlar")
+        btn_more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        btn_more.setMenu(self.menu_more)
+        self.btn_more = btn_more
+        self.act_more_widget = toolbar.addWidget(btn_more)
+
+        self.adv_toolbar_separators = []
+
         self.btn_extension = QToolButton(self)
         self.btn_extension.setText("🌐 Eklenti")
         self.btn_extension.setToolTip("Tarayıcı Eklentisi: Klasörü Aç/Seç, Yolu Kopyala, Otomatik Yükle veya Rehber")
@@ -415,24 +750,38 @@ class MainWindow(QMainWindow):
         self.btn_extension.setMenu(ext_menu)
         self.btn_extension.clicked.connect(self._show_extension_guide)
 
-        self.act_extension = QAction("🌐 Eklenti", self)
-        self.act_extension.setToolTip("Chrome / Edge Tarayıcı Eklentisi Kurulum Kılavuzu")
-        self.act_extension.triggered.connect(self._show_extension_guide)
-
+        # Araç çubuğuna eklenmeyen bir QToolButton ana pencerenin (0,0) noktasında
+        # kalıp menü çubuğunun ilk maddesinin üzerine çiziliyordu; bu yüzden
+        # düğme, ait olduğu araç çubuğuna açıkça eklenir.
         self.act_extension_widget = toolbar.addWidget(self.btn_extension)
 
-        self.act_statistics = QAction("📊 İstatistikler", self)
-        self.act_statistics.setToolTip("İndirme İstatistikleri ve Ağ Trafiği Raporunu Aç")
-        self.act_statistics.triggered.connect(self._show_statistics_dialog)
-        toolbar.addAction(self.act_statistics)
+        # ---- 2. Grup: Basit / Gelişmiş mod geçişi -----------------------
+        # İkinci grup, geniş pencerede aynı satırda sağ kenara yaslanır;
+        # pencere 1100px'in altına düşünce şerit otomatik olarak ikinci
+        # satıra geçer (bkz. _update_toolbar_break).
+        self.toolbar_break_width = 1100
+        self._toolbar_broken = None
 
-        self.act_clean_missing = QAction("🧹 Eksik Dosyaları Temizle", self)
-        self.act_clean_missing.setToolTip("Diskten silinmiş veya taşınmış tamamlanmış indirmeleri listeden ayıkla")
-        self.act_clean_missing.triggered.connect(self._clean_missing_files)
-        toolbar.addAction(self.act_clean_missing)
+        toolbar2 = QToolBar("İkincil Şerit")
+        toolbar2.setMovable(False)
+        self.toolbar2 = toolbar2
 
-        sep_conc = toolbar.addSeparator()
-        self.adv_toolbar_separators.append(sep_conc)
+        tb_spacer = QWidget()
+        tb_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.tb_spacer = tb_spacer
+        toolbar2.addWidget(tb_spacer)
+
+        self.btn_mode_toggle = QPushButton("🟢 Basit Mod (Geç: Gelişmiş ❯)")
+        self.btn_mode_toggle.setObjectName("btn_mode_toggle")
+        self.btn_mode_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_mode_toggle.clicked.connect(self._toggle_ui_mode)
+        toolbar2.addWidget(self.btn_mode_toggle)
+
+        self.addToolBar(toolbar2)
+        self._update_toolbar_break()
+
+        # ---- İkincil şerit: sürekli ayarlar araç çubuğundan çıkarılıp
+        # ince bir şeride taşındı (yalnızca Gelişmiş modda görünür).
 
         # Concurrency Widget (Sequential Queue Limit)
         self.tb_conc_widget = QWidget()
@@ -441,7 +790,7 @@ class MainWindow(QMainWindow):
         tb_conc_layout.setSpacing(6)
 
         lbl_conc = QLabel("⚡ Sıralı:")
-        lbl_conc.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_conc.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         lbl_conc.setToolTip("Aynı anda indirilecek maksimum dosya sayısı (Sıralı İndirme Limiti)")
         tb_conc_layout.addWidget(lbl_conc)
 
@@ -449,34 +798,28 @@ class MainWindow(QMainWindow):
         self.spin_tb_concurrent.setRange(1, 10)
         self.spin_tb_concurrent.setValue(self.queue_mgr.max_concurrent)
         self.spin_tb_concurrent.setSuffix(" Dosya")
-        self.spin_tb_concurrent.setFixedWidth(85)
         self.spin_tb_concurrent.setToolTip("Aynı anda inecek dosya sayısı (biri bitince sıradaki başlar)")
         self.spin_tb_concurrent.valueChanged.connect(self._on_toolbar_concurrent_changed)
         tb_conc_layout.addWidget(self.spin_tb_concurrent)
 
-        self.act_conc_widget = toolbar.addWidget(self.tb_conc_widget)
-
-        sep_sched2 = toolbar.addSeparator()
-        self.adv_toolbar_separators.append(sep_sched2)
-
-        # Scheduler Quick Control Widget on Toolbar
+        # Scheduler Quick Control Widget
         self.tb_sched_widget = QWidget()
         tb_sched_layout = QHBoxLayout(self.tb_sched_widget)
         tb_sched_layout.setContentsMargins(6, 0, 6, 0)
         tb_sched_layout.setSpacing(6)
 
         self.chk_tb_scheduler = QCheckBox("⏱ Zamanlayıcı:")
-        self.chk_tb_scheduler.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        self.chk_tb_scheduler.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         self.chk_tb_scheduler.setToolTip("Gece indirmesi zamanlayıcısını Aç / Kapat")
         self.chk_tb_scheduler.toggled.connect(self._on_toolbar_scheduler_toggled)
         tb_sched_layout.addWidget(self.chk_tb_scheduler)
 
         self.lbl_tb_sched_time = QLabel("02:00 - 07:00")
-        self.lbl_tb_sched_time.setStyleSheet("color: #c0caf5; font-size: 11px;")
+        self.lbl_tb_sched_time.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px;")
         tb_sched_layout.addWidget(self.lbl_tb_sched_time)
 
         self.lbl_tb_sched_badge = QLabel("Kapalı")
-        self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #7982a9; min-width: 60px;")
+        self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['text_secondary']}; min-width: 60px;")
         tb_sched_layout.addWidget(self.lbl_tb_sched_badge)
 
         btn_sched_cfg = QPushButton("⚙")
@@ -486,32 +829,38 @@ class MainWindow(QMainWindow):
         btn_sched_cfg.clicked.connect(self._show_scheduler_dialog)
         tb_sched_layout.addWidget(btn_sched_cfg)
 
-        self.act_sched_widget = toolbar.addWidget(self.tb_sched_widget)
-
-        sep_lim = toolbar.addSeparator()
-        self.adv_toolbar_separators.append(sep_lim)
-
-        # Global Speed Limiter Widget on Toolbar (IDM Quick Limiter)
+        # Global Speed Limiter Widget (IDM Quick Limiter)
         self.tb_limiter_widget = QWidget()
         tb_limiter_layout = QHBoxLayout(self.tb_limiter_widget)
         tb_limiter_layout.setContentsMargins(6, 0, 6, 0)
         tb_limiter_layout.setSpacing(8)
 
-        self.chk_tb_speed_limit = QCheckBox("⚡ Hız Limiti:")
-        self.chk_tb_speed_limit.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        # Metin kırpılmasın: "⚡ Hız Limiti:" etiketi düz QLabel, onay kutusu sadece kare.
+        lbl_limiter = QLabel("⚡ Hız Limiti:")
+        lbl_limiter.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
+        lbl_limiter.setToolTip("Hız Sınırlayıcıyı tek tıkla Aç / Kapat (Tam Hız)")
+        tb_limiter_layout.addWidget(lbl_limiter)
+
+        self.chk_tb_speed_limit = QCheckBox()
         self.chk_tb_speed_limit.setToolTip("Hız Sınırlayıcıyı tek tıkla Aç / Kapat (Tam Hız)")
         self.chk_tb_speed_limit.toggled.connect(self._on_toolbar_limit_toggled)
         tb_limiter_layout.addWidget(self.chk_tb_speed_limit)
+
+        # Slider + hazır limit + durum etiketi tek grupta hizalanır.
+        limit_group = QWidget()
+        limit_group_layout = QHBoxLayout(limit_group)
+        limit_group_layout.setContentsMargins(0, 0, 0, 0)
+        limit_group_layout.setSpacing(6)
 
         self.slider_tb_limit = QSlider(Qt.Orientation.Horizontal)
         self.slider_tb_limit.setRange(256, 50 * 1024)  # 256 KB/s - 50 MB/s
         self.slider_tb_limit.setSingleStep(256)
         self.slider_tb_limit.setPageStep(1024)
-        self.slider_tb_limit.setFixedWidth(130)
+        self.slider_tb_limit.setFixedWidth(112)
         self.slider_tb_limit.setToolTip("İndirme hız limitini kaydırarak ayarlayın")
         self.slider_tb_limit.setEnabled(False)
         self.slider_tb_limit.valueChanged.connect(self._on_toolbar_slider_changed)
-        tb_limiter_layout.addWidget(self.slider_tb_limit)
+        limit_group_layout.addWidget(self.slider_tb_limit)
 
         self.combo_tb_limit = QComboBox()
         self.combo_tb_limit.addItem("512 KB/s", 512)
@@ -525,25 +874,23 @@ class MainWindow(QMainWindow):
         self.combo_tb_limit.setToolTip("Hazır hız limiti seçin")
         self.combo_tb_limit.setEnabled(False)
         self.combo_tb_limit.currentIndexChanged.connect(self._on_toolbar_combo_changed)
-        tb_limiter_layout.addWidget(self.combo_tb_limit)
+        limit_group_layout.addWidget(self.combo_tb_limit)
 
         self.lbl_tb_limit_val = QLabel("Tam Hız")
-        self.lbl_tb_limit_val.setStyleSheet("font-weight: bold; color: #9ece6a; min-width: 75px;")
-        tb_limiter_layout.addWidget(self.lbl_tb_limit_val)
+        self.lbl_tb_limit_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._apply_limit_badge_style(success=True)
+        limit_group_layout.addWidget(self.lbl_tb_limit_val)
 
-        self.act_limiter_widget = toolbar.addWidget(self.tb_limiter_widget)
+        tb_limiter_layout.addWidget(limit_group)
 
-        sep_qa = toolbar.addSeparator()
-        self.adv_toolbar_separators.append(sep_qa)
-
-        # Queue Completion Power Action Widget on Toolbar
+        # Queue Completion Power Action Widget
         self.tb_queue_widget = QWidget()
         tb_queue_layout = QHBoxLayout(self.tb_queue_widget)
         tb_queue_layout.setContentsMargins(6, 0, 6, 0)
         tb_queue_layout.setSpacing(6)
 
         lbl_qa = QLabel("🏁 Kuyruk Bitince:")
-        lbl_qa.setStyleSheet("font-weight: bold; color: #7aa2f7;")
+        lbl_qa.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
         tb_queue_layout.addWidget(lbl_qa)
 
         self.combo_tb_queue_action = QComboBox()
@@ -558,33 +905,42 @@ class MainWindow(QMainWindow):
         self.combo_tb_queue_action.currentIndexChanged.connect(self._on_toolbar_queue_action_changed)
         tb_queue_layout.addWidget(self.combo_tb_queue_action)
 
-        self.act_queue_widget = toolbar.addWidget(self.tb_queue_widget)
+        # İkincil şeridi kur
+        self.quick_bar = QWidget()
+        quick_layout = QHBoxLayout(self.quick_bar)
+        quick_layout.setContentsMargins(8, 2, 8, 2)
+        quick_layout.setSpacing(10)
+        quick_layout.addWidget(self.tb_conc_widget)
+        quick_layout.addWidget(self.tb_sched_widget)
+        quick_layout.addWidget(self.tb_limiter_widget)
+        quick_layout.addWidget(self.tb_queue_widget)
+        quick_bar_spacer = QWidget()
+        quick_bar_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        quick_layout.addWidget(quick_bar_spacer)
+        self.quick_bar.setObjectName("quick_settings_bar")
+        self._apply_toolbar_icons()
 
-        # Toolbar Spacer and Mode Switcher (Basit / Gelişmiş Mod Geçişi)
-        tb_spacer = QWidget()
-        tb_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(tb_spacer)
-
-        self.btn_mode_toggle = QPushButton("🟢 Basit Mod (Geç: Gelişmiş ❯)")
-        self.btn_mode_toggle.setObjectName("btn_mode_toggle")
-        self.btn_mode_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_mode_toggle.clicked.connect(self._toggle_ui_mode)
-        toolbar.addWidget(self.btn_mode_toggle)
 
 
         # Central Widget
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        # Dikey: üstte ikincil ayar şeridi, altında kategori ağacı + indirme listesi.
+        main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(6)
+
+        main_layout.addWidget(self.quick_bar)  # İkincil ayar şeridi (Gelişmiş mod)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(splitter, 1)
 
         # Left: Categories Tree
-        self.tree_categories = QTreeWidget()
+        self.tree_categories = CategoriesTreeWidget(parent_window=self)
+        self.tree_categories.root_queues_item = None
         self.tree_categories.setHeaderHidden(True)
-        self.tree_categories.setFixedWidth(200)
+        # Sabit genişlik yazıları kesiyordu (örn. "Devam Edenler"); minimum pay + splitter esnekliği.
+        self.tree_categories.setMinimumWidth(240)
 
         root_all = QTreeWidgetItem(["📥 Tüm İndirmeler"])
         root_all.setData(0, Qt.ItemDataRole.UserRole, "All")
@@ -618,13 +974,17 @@ class MainWindow(QMainWindow):
         self.root_queues = QTreeWidgetItem(["🗂️ Kuyruklar"])
         self.root_queues.setData(0, Qt.ItemDataRole.UserRole, "__QUEUES_ROOT__")
         self.tree_categories.addTopLevelItem(self.root_queues)
+        self.tree_categories.root_queues_item = self.root_queues
         self.root_queues.setExpanded(True)
         self._refresh_queues_tree()
+        self._restore_tree_state()
 
         self.tree_categories.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree_categories.customContextMenuRequested.connect(self._show_categories_tree_context_menu)
 
         self.tree_categories.currentItemChanged.connect(self._on_category_changed)
+        self.tree_categories.itemExpanded.connect(self._persist_tree_state)
+        self.tree_categories.itemCollapsed.connect(self._persist_tree_state)
         splitter.addWidget(self.tree_categories)
 
         # Right: Container with Live Search & Filter Bar + Downloads Table
@@ -643,32 +1003,43 @@ class MainWindow(QMainWindow):
         self.edit_search.setPlaceholderText("🔍 Dosya adı veya link ara... (Ctrl+F)")
         self.edit_search.setClearButtonEnabled(True)
         self.edit_search.setStyleSheet(
-            "QLineEdit { background-color: #1f2335; border: 1px solid #3b4261; border-radius: 6px; padding: 4px 10px; color: #c0caf5; font-size: 12px; min-height: 22px; }"
-            "QLineEdit:focus { border: 1px solid #7aa2f7; }"
+            f"QLineEdit {{ background-color: {T['bg_panel']}; border: 1px solid {T['border']}; border-radius: 6px; padding: 4px 10px; color: {T['text_primary']}; font-size: 12px; min-height: 22px; }}"
+            f"QLineEdit:focus {{ border: 1px solid {T['accent']}; }}"
         )
         self.edit_search.textChanged.connect(self._apply_search_and_filter)
         sf_layout.addWidget(self.edit_search, stretch=1)
 
-        # Quick Status Filter Chips
-        self.filter_btn_group = {}
-        for chip_id, chip_label in [
+        # Quick Status Filter — 5 çip yerine tek açılır QToolButton (çubuğu rahatlatır)
+        self._filter_chip_defs = [
             ("all", "Tümü"),
             ("Downloading", "⏳ İnenler"),
             ("Completed", "✔ Tamamlanan"),
             ("Paused", "⏸ Duraklatılan"),
             ("Error", "❌ Hatalı"),
-        ]:
-            btn = QPushButton(chip_label)
-            btn.setCheckable(True)
-            btn.setChecked(chip_id == "all")
-            btn.setStyleSheet(
-                "QPushButton { background-color: #24283b; border: 1px solid #3b4261; border-radius: 5px; padding: 4px 8px; color: #a9b1d6; font-size: 11px; font-weight: bold; min-height: 20px; }"
-                "QPushButton:checked { background-color: #7aa2f7; color: #1a1b26; border-color: #7aa2f7; }"
-                "QPushButton:hover:!checked { background-color: #2f3549; color: #c0caf5; }"
-            )
-            btn.clicked.connect(lambda checked, c=chip_id: self._on_filter_chip_clicked(c))
-            self.filter_btn_group[chip_id] = btn
-            sf_layout.addWidget(btn)
+        ]
+        self.filter_btn_group = {}  # chip_id -> QAction (menü öğesi)
+        self.btn_filter_menu = QToolButton()
+        self.btn_filter_menu.setText("🔽 Tümü ▾")
+        self.btn_filter_menu.setToolTip("Duruma göre filtrele")
+        self.btn_filter_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_filter_menu.setStyleSheet(
+            f"QToolButton {{ background-color: {T['bg_card']}; border: 1px solid {T['border']};"
+            f" border-radius: 5px; padding: 4px 10px; color: {T['text_muted']}; font-size: 11px;"
+            f" font-weight: bold; min-height: 20px; }}"
+            f"QToolButton:hover {{ background-color: {T['bg_hover']}; color: {T['text_primary']};"
+            f" border-color: {T['accent']}; }}"
+            f"QToolButton::menu-indicator {{ image: none; width: 0px; }}"
+        )
+        self.menu_filter = QMenu(self)
+        for chip_id, chip_label in self._filter_chip_defs:
+            act = QAction(chip_label, self)
+            act.setCheckable(True)
+            act.setChecked(chip_id == "all")
+            act.triggered.connect(lambda checked=False, c=chip_id: self._on_filter_chip_clicked(c))
+            self.menu_filter.addAction(act)
+            self.filter_btn_group[chip_id] = act
+        self.btn_filter_menu.setMenu(self.menu_filter)
+        sf_layout.addWidget(self.btn_filter_menu)
 
         # Multi-criteria Filter Combos
         self.combo_size_filter = QComboBox()
@@ -677,7 +1048,6 @@ class MainWindow(QMainWindow):
         self.combo_size_filter.addItem("50 - 500 MB", "medium")
         self.combo_size_filter.addItem("500 MB - 2 GB", "large")
         self.combo_size_filter.addItem("> 2 GB", "huge")
-        self.combo_size_filter.setFixedWidth(115)
         self.combo_size_filter.currentIndexChanged.connect(self._apply_search_and_filter)
         sf_layout.addWidget(self.combo_size_filter)
 
@@ -687,12 +1057,13 @@ class MainWindow(QMainWindow):
         self.combo_date_filter.addItem("Dün", "yesterday")
         self.combo_date_filter.addItem("Son 7 Gün", "week")
         self.combo_date_filter.addItem("Daha Eski", "older")
-        self.combo_date_filter.setFixedWidth(115)
         self.combo_date_filter.currentIndexChanged.connect(self._apply_search_and_filter)
         sf_layout.addWidget(self.combo_date_filter)
 
         self.lbl_filter_count = QLabel("0 / 0")
-        self.lbl_filter_count.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: bold; padding: 0 4px;")
+        self.lbl_filter_count.setStyleSheet(f"color: {T['accent']}; font-size: 11px; font-weight: bold; padding: 0 4px;")
+        self.lbl_filter_count.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        sf_layout.addStretch(2)  # sayaç çubuğun en sağına sabitlenir
         sf_layout.addWidget(self.lbl_filter_count)
 
         right_layout.addWidget(search_filter_bar)
@@ -714,6 +1085,7 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_table_context_menu)
         self.table.cellDoubleClicked.connect(self._on_row_double_click)
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_run_toggle_state())
 
         # Smart column sorting
         self.table.setSortingEnabled(True)
@@ -746,18 +1118,54 @@ class MainWindow(QMainWindow):
         self.shortcut_batch = QShortcut(QKeySequence("Ctrl+B"), self)
         self.shortcut_batch.activated.connect(lambda: self._show_batch_add_dialog())
 
-        right_layout.addWidget(self.table)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([200, 800])
+        # Komut Paleti (Ctrl+K) — eylemleri tek yerden arayıp çalıştır
+        self.shortcut_palette = QShortcut(QKeySequence("Ctrl+K"), self)
+        self.shortcut_palette.activated.connect(self._show_command_palette)
 
-        # Status Bar
+        # Kısayol Dökümü (F1)
+        self.shortcut_help_shortcuts = QShortcut(QKeySequence("F1"), self)
+        self.shortcut_help_shortcuts.activated.connect(self._show_shortcuts_dialog)
+
+        from ui.empty_state import EmptyStateWidget
+        self.table_stack = QStackedWidget()
+        self.table_stack.addWidget(self.table)
+
+        self.empty_state = EmptyStateWidget()
+        self.empty_state.add_clicked.connect(self._show_add_dialog)
+        self.empty_state.batch_clicked.connect(self._show_batch_add_dialog)
+        self.table_stack.addWidget(self.empty_state)
+
+        self.table_stack.setCurrentWidget(self.empty_state)  # boş listede başlat
+        self._sync_empty_state()
+        right_layout.addWidget(self.table_stack)
+        splitter.addWidget(right_panel)
+        splitter.setSizes([240, 760])
+
+        # Status Bar — kalıcılar: toplam hız + hız grafiği + kısa uyarı.
+        # Diğer durumlar ⚡ açılır durum panelinde toplanır.
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+
+        # Açılır durum paneli: disk, hız sınırı, zamanlayıcı, köprü durumu.
+        self.btn_status_panel = QToolButton()
+        self.btn_status_panel.setText("ℹ️ Durum")
+        self.btn_status_panel.setToolTip("Disk, hız sınırı, zamanlayıcı ve köprü durumunu gör")
+        self.btn_status_panel.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.menu_status_panel = QMenu(self.btn_status_panel)
+        self.menu_status_panel.aboutToShow.connect(self._refresh_status_panel)
+        self.act_status_disk = self.menu_status_panel.addAction("💾 Disk —")
+        self.act_status_limiter = self.menu_status_panel.addAction("⚡ Hız Sınırı —")
+        self.act_status_scheduler = self.menu_status_panel.addAction("⏱ Zamanlayıcı —")
+        self.menu_status_panel.addSeparator()
+        self.act_status_bridge = self.menu_status_panel.addAction("🌐 Tarayıcı Köprüsü —")
+        self.act_status_bridge.triggered.connect(self._show_settings_dialog)
+        self.btn_status_panel.setMenu(self.menu_status_panel)
+        self.status_bar.addWidget(self.btn_status_panel)
+
+        # Referans etiketler: değerleri mevcut güncelleme kodu ile canlı tutulur,
+        # doğrudan görünmez; panel açılırken okunur.
         self.lbl_ext_status = QLabel("Tarayıcı Köprüsü: Başlatılıyor...")
-        self.lbl_ext_status.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-left: 10px; cursor: pointer;")
-        self.lbl_ext_status.setToolTip("Tarayıcı köprüsü durumunu görmek veya yapılandırmak için tıklayın.")
-        self.lbl_ext_status.mousePressEvent = self._on_lbl_ext_status_clicked
-        self.status_bar.addWidget(self.lbl_ext_status)
+        self.lbl_ext_status.hide()
 
         # Real-time Bandwidth Sparkline Graph (Clickable -> Opens Statistics)
         self.speed_graph = BandwidthGraphWidget(parent=self)
@@ -766,41 +1174,37 @@ class MainWindow(QMainWindow):
         self.status_bar.addWidget(self.speed_graph)
 
         self.lbl_speed_stat = QLabel("Toplam Hız: 0 KB/s")
-        self.lbl_speed_stat.setStyleSheet("color: #7aa2f7; font-weight: bold; margin-left: 10px;")
+        self.lbl_speed_stat.setStyleSheet(f"color: {T['accent']}; font-weight: bold; margin-left: 10px;")
         self.status_bar.addWidget(self.lbl_speed_stat)
 
-        # Disk Free Space Indicator
+        # Referans etiketler (panelde gösterilir)
         self.lbl_disk_stat = QLabel("💾 Disk: Taranıyor...")
-        self.lbl_disk_stat.setStyleSheet("color: #7dcfff; font-weight: bold; margin-left: 15px;")
-        self.status_bar.addWidget(self.lbl_disk_stat)
+        self.lbl_disk_stat.hide()
 
         self.lbl_limiter_stat = QLabel("⚡ Hız Sınırı: Kapalı (Tam Hız)")
-        self.lbl_limiter_stat.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 20px;")
-        self.status_bar.addWidget(self.lbl_limiter_stat)
+        self.lbl_limiter_stat.hide()
 
         self.lbl_scheduler_stat = QLabel("⏱ Zamanlayıcı: Kapalı")
-        self.lbl_scheduler_stat.setStyleSheet("color: #7982a9; font-weight: bold; margin-left: 20px;")
-        self.status_bar.addWidget(self.lbl_scheduler_stat)
+        self.lbl_scheduler_stat.hide()
 
-        # Metered Connection Status Button
+        # Kota koruması uyarısı: güvenlik uyarısı olarak kalıcı ve görünür.
         self.btn_metered_stat = QPushButton("📶 Tarifeli Bağlantı (Kota Koruması Aktif - Tıkla)")
-        self.btn_metered_stat.setStyleSheet("""
-            QPushButton {
-                background-color: #f7768e;
-                color: #1a1b26;
+        self.btn_metered_stat.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['danger']};
+                color: {T['text_on_accent']};
                 font-weight: bold;
                 border-radius: 4px;
                 padding: 2px 8px;
                 margin-left: 15px;
-            }
-            QPushButton:hover {
-                background-color: #ff9e64;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['color_orange']};
+            }}
         """)
         self.btn_metered_stat.setToolTip("Tarifeli mobil veri / hotspot bağlantısı algılandı. Tıklayarak kota korumasını geçici olarak devre dışı bırakabilirsiniz.")
         self.btn_metered_stat.clicked.connect(self._on_metered_btn_clicked)
-        self.btn_metered_stat.hide()
-        self.status_bar.addWidget(self.btn_metered_stat)
+        self.status_bar.addPermanentWidget(self.btn_metered_stat)
 
         # Timer for smooth speed graph decay and disk space sync
         self.timer_speed_decay = QTimer(self)
@@ -817,8 +1221,187 @@ class MainWindow(QMainWindow):
         st = self.scheduler.get_status()
         self._sync_scheduler_toolbar_ui(st)
 
-    def _init_signals(self):
-        # Connect queue manager thread-safe callbacks to PyQt signals
+    def _apply_toolbar_icons(self):
+        """Araç çubuğuna tema renkli SVG ikonlarını uygular (tema değişince yeniden çağrılır)."""
+        try:
+            from ui.icons import apply_theme_icons, ICON_SIZE
+        except Exception:
+            return
+        toolbar = getattr(self, "toolbar", None)
+        if toolbar is not None:
+            toolbar.setIconSize(ICON_SIZE)
+        icons = apply_theme_icons()
+        self._icon_pack = icons
+        act_add = getattr(self, "act_add", None)
+        if act_add is not None:
+            act_add.setIcon(icons["plus"])
+        act_run = getattr(self, "act_toggle_run", None)
+        if act_run is not None:
+            act_run.setIcon(icons["play"])
+        act_del = getattr(self, "act_delete", None)
+        if act_del is not None:
+            act_del.setIcon(icons["trash"])
+        act_set = getattr(self, "act_settings", None)
+        if act_set is not None:
+            act_set.setIcon(icons["settings"])
+        btn_more = getattr(self, "btn_more", None)
+        if btn_more is not None:
+            btn_more.setIcon(icons["more"])
+
+    def _refresh_status_panel(self):
+        """⚡ Durum panelini açılmadan günceller (disk, limit, zamanlayıcı, köprü)."""
+        self.act_status_disk.setText(getattr(self, "lbl_disk_stat", None) and self.lbl_disk_stat.text() or "💾 Disk: Bilinmiyor")
+        self.act_status_limiter.setText(getattr(self, "lbl_limiter_stat", None) and self.lbl_limiter_stat.text() or "⚡ Hız Sınırı: —")
+        self.act_status_scheduler.setText(getattr(self, "lbl_scheduler_stat", None) and self.lbl_scheduler_stat.text() or "⏱ Zamanlayıcı: —")
+        self.act_status_bridge.setText(getattr(self, "lbl_ext_status", None) and self.lbl_ext_status.text() or "🌐 Tarayıcı Köprüsü: —")
+
+    def _row_is_running(self, row: int) -> bool:
+        """Satırın sütun-5 durumuna göre True döndürür: 'Downloading'."""
+        item = self.table.item(row, 0) if row < self.table.rowCount() else None
+        if item is None:
+            return False
+        st = self.table.item(row, 5)
+        if st is not None:
+            raw = st.data(Qt.ItemDataRole.UserRole)
+            if raw == "Downloading" or (isinstance(raw, str) and "Downloading" in raw):
+                return True
+        return False
+
+    def _on_toggle_run_triggered(self):
+        """▶/⏸ tek toggle: seçili indirmelerden biri çalışıyorsa duraklat, değilse başlat."""
+        model = self.table.selectionModel() if hasattr(self, "table") else None
+        if model is None:
+            self._start_selected()
+            return
+        rows = sorted(set(idx.row() for idx in model.selectedRows()))
+        if any(self._row_is_running(r) for r in rows):
+            self._pause_selected()
+        else:
+            self._start_selected()
+
+    def _update_run_toggle_state(self):
+        """Seçime ve koşum durumuna göre ▶/⏸ düğmesinin metnini günceller."""
+        act = getattr(self, "act_toggle_run", None)
+        if act is None:
+            return
+        model = self.table.selectionModel() if hasattr(self, "table") else None
+        rows = set(idx.row() for idx in model.selectedRows()) if model is not None else set()
+        rows = {r for r in rows if 0 <= r < self.table.rowCount()}
+        if not rows:
+            act.setText("▶ Başlat")
+            act.setToolTip("Seçili indirmeleri başlatır")
+            icons = getattr(self, "_icon_pack", {})
+            if icons:
+                act.setIcon(icons["play"])
+            return
+        icons = getattr(self, "_icon_pack", {})
+        if any(self._row_is_running(r) for r in rows):
+            act.setText("⏸ Duraklat")
+            act.setToolTip("Seçili çalışan indirmeleri duraklatır")
+            if icons:
+                act.setIcon(icons["pause"])
+        else:
+            act.setText("▶ Başlat")
+            act.setToolTip("Seçili indirmeleri başlatır")
+            if icons:
+                act.setIcon(icons["play"])
+
+    def _persist_tree_state(self, item=None):
+        """Sol panel başlıklarının (Kategori/Etiketler/Kuyruklar) açık-kapalı durumunu kalıcı saklar."""
+        try:
+            state = self.db.get_setting("sidebar_tree_expanded", {})
+            if not isinstance(state, dict):
+                state = {}
+            key = getattr(self, "root_all", None)
+            for name, root in (("all", self.root_all), ("tags", self.root_tags), ("queues", self.root_queues)):
+                if root is not None:
+                    state[name] = root.isExpanded()
+            self.db.set_setting("sidebar_tree_expanded", state)
+        except Exception:
+            pass
+
+    def _restore_tree_state(self):
+        try:
+            state = self.db.get_setting("sidebar_tree_expanded", {})
+            if not isinstance(state, dict):
+                return
+            mapping = (("all", self.root_all), ("tags", self.root_tags), ("queues", self.root_queues))
+            for name, root in mapping:
+                if root is not None and name in state:
+                    root.setExpanded(bool(state.get(name)))
+        except Exception:
+            pass
+
+    def _show_command_palette(self):
+        """Ctrl+K komut paletini açar: tüm eylemler aramayla tek yerden."""
+        from ui.command_palette import CommandPaletteDialog
+        commands = []
+        toolbar_actions = [
+            ("▶/⏸ Başlat / Duraklat (Seçili)", lambda: self._on_toggle_run_triggered()),
+            ("🗑 Sil (Seçili)", self._delete_selected),
+            ("➕ URL Ekle", self._show_add_dialog),
+            ("⚙ Ayarlar", self._show_settings_dialog),
+            ("📑 Oynatma Listesi İndir", lambda: self._show_playlist_dialog()),
+            ("📋 Toplu Link Ekle", lambda: self._show_batch_add_dialog()),
+            ("⚡ Kuyruğu Başlat", self._on_start_all),
+            ("⏸ Tümünü Durdur", self._on_pause_all),
+            ("⏱ Zamanlayıcı", self._show_scheduler_dialog),
+            ("📊 İstatistikler", self._show_statistics_dialog),
+            ("🧹 Eksik Dosyaları Temizle", self._clean_missing_files),
+            ("📂 Dosyayı Aç", self._open_selected_file),
+            ("📁 Klasörde Göster", self._open_selected_folder),
+            ("🌐 Eklenti Kılavuzu", self._show_extension_guide),
+            ("💥 Dosyayla Sil", self._delete_selected_with_files),
+            ("⏹ Seçilenleri İptal Et", self._cancel_selected),
+            ("🧙 Kurulum Sihirbazı", self._show_setup_wizard),
+            ("🚀 Onboarding Turu", self._show_onboarding_dialog),
+        ]
+        for label, cb in toolbar_actions:
+            commands.append((label, cb, "Eylemler"))
+        # Mod geçişleri + filtre kategorileri
+        commands.append(("Arayüz Modu: Basit ⟷ Gelişmiş Geçiş", self._toggle_ui_mode, "Görünüm"))
+        for cat_key, cat_label in (("All", "Kategori: Tüm İndirmeler"), ("Completed", "Kategori: Tamamlananlar"),
+                                    ("Downloading", "Kategori: Devam Edenler"), ("Video", "Kategori: Videolar"),
+                                    ("Music", "Kategori: Müzik")):
+            commands.append((cat_label, lambda key=cat_key: self._on_category_changed(None, self._category_item_for(key)), "Görünüm"))
+        # Basit mod / arama odak
+        commands.append(("Aramaya Odaklan (Ctrl+F)", self.edit_search.setFocus, "Görünüm"))
+        dlg = CommandPaletteDialog(self)
+        self._apply_palette_dark = True
+        dlg.open_with(commands)
+
+    def _category_item_for(self, key: str):
+        """Kategori anahtarına uygun ItemsItem döndürür (komut paleti için)."""
+        it = self.tree_categories.topLevelItem(0)
+        if it is not None and it.data(0, Qt.ItemDataRole.UserRole) == "All":
+            for i in range(it.childCount()):
+                ch = it.child(i)
+                if ch.data(0, Qt.ItemDataRole.UserRole) == key:
+                    return ch
+        return it
+
+    def _show_shortcuts_dialog(self):
+        """F1: mevcut kısayolların okunur dökümü."""
+        rows = [
+            ("Ctrl+N", "Yeni URL Ekle"),
+            ("Ctrl+B", "Toplu Link Ekle"),
+            ("Ctrl+F", "Aramaya Odaklan"),
+            ("Ctrl+K", "Komut Paleti"),
+            ("Ctrl+P", "Ayarlar"),
+            ("Delete", "Seçileni Listeden Kaldır"),
+            ("Shift+Delete", "Seçileni Dosyasıyla Sil"),
+            ("Ctrl+Up / Ctrl+Down", "Kuyruğunda yukarı/aşağı taşı"),
+            ("Esc", "Aramayı Temizle"),
+            ("F1", "Bu kısayol listesi"),
+        ]
+        lines = "\n".join([f"<tr><td style='padding:4px 14px 4px 0;'><b>{k}</b></td><td style='padding:4px 0;'>{v}</td></tr>" for k, v in rows])
+        QMessageBox.information(
+            self,
+            "Kısayollar (F1)",
+            f"<table>{lines}</table>"
+        )
+
+    def _init_signals(self):        # Connect queue manager thread-safe callbacks to PyQt signals
         self.queue_mgr.on_task_progress = lambda did, d, t, s, e: self.sig_progress_update.emit(did, d, t, s, e)
         self.queue_mgr.on_task_segments = lambda did, segs: self.sig_segments_update.emit(did, segs)
         self.queue_mgr.on_task_status = lambda did, st, err: self.sig_status_update.emit(did, st, err)
@@ -851,6 +1434,16 @@ class MainWindow(QMainWindow):
         self.sig_scheduler_tick.connect(self._handle_scheduler_tick)
         self.sig_scheduler_started.connect(self._handle_scheduler_started)
         self.sig_scheduler_stopped.connect(self._handle_scheduler_stopped)
+
+    def _sync_empty_state(self):
+        """Tablo boşken yönlendirme ekranını gösterir; ilk indirmenin eklenmesiyle tabloya döner."""
+        stack = getattr(self, "table_stack", None)
+        if stack is None:
+            return
+        empty = self.table.rowCount() == 0
+        stack.setCurrentWidget(self.empty_state if empty else self.table)
+        if empty and getattr(self, "speed_graph", None) is not None:
+            pass
 
     def _load_downloads_to_table(self):
         self.table.setRowCount(0)
@@ -999,6 +1592,7 @@ class MainWindow(QMainWindow):
             if item_st:
                 item_st.setText(status)
                 item_st.setData(Qt.ItemDataRole.UserRole, status)
+            self._update_run_toggle_state()
 
             rec = self.queue_mgr.get_download(download_id)
             if rec:
@@ -1202,11 +1796,11 @@ class MainWindow(QMainWindow):
         """Updates the status bar indicator and delivers warnings on conflict."""
         if status == "running":
             self.lbl_ext_status.setText(f"🟢 Tarayıcı Köprüsü: Aktif (Port {port})")
-            self.lbl_ext_status.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"Köprü sunucusu 127.0.0.1:{port} adresinde aktif.\nKurulum kılavuzu için tıklayın.")
         elif status == "running_fallback":
             self.lbl_ext_status.setText(f"🟡 Tarayıcı Köprüsü: Aktif (Port {port} - Çakışma Çözüldü)")
-            self.lbl_ext_status.setStyleSheet("color: #e0af68; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['warning']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"{message}\nTarayıcı eklentisi bu yeni porta otomatik bağlanacaktır.\nDetaylar için tıklayın.")
             if hasattr(self, "tray") and self.tray:
                 self.tray.showMessage(
@@ -1217,7 +1811,7 @@ class MainWindow(QMainWindow):
                 )
         elif status == "conflict":
             self.lbl_ext_status.setText(f"🔴 Tarayıcı Köprüsü: Port Çakışması (Port {port})")
-            self.lbl_ext_status.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['danger']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"Port {port} başka bir program tarafından kullanılıyor!\nAyarları açıp portu değiştirmek için tıklayın.")
             if hasattr(self, "tray") and self.tray:
                 self.tray.showMessage(
@@ -1228,11 +1822,11 @@ class MainWindow(QMainWindow):
                 )
         elif status == "error":
             self.lbl_ext_status.setText(f"🔴 Tarayıcı Köprüsü: Hata (Port {port})")
-            self.lbl_ext_status.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['danger']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip(f"Köprü sunucusu hatası: {message}\nTekrar denemek için tıklayın.")
         elif status == "stopped":
             self.lbl_ext_status.setText("⚪ Tarayıcı Köprüsü: Kapalı")
-            self.lbl_ext_status.setStyleSheet("color: #565f89; font-weight: bold; margin-left: 10px; cursor: pointer;")
+            self.lbl_ext_status.setStyleSheet(f"color: {T['disabled_text']}; font-weight: bold; margin-left: 10px; cursor: pointer;")
             self.lbl_ext_status.setToolTip("Köprü sunucusu durduruldu.")
 
     def _on_lbl_ext_status_clicked(self, event):
@@ -1816,6 +2410,11 @@ class MainWindow(QMainWindow):
                 if btn.isChecked():
                     active_chip = chip_id
                     break
+        if hasattr(self, "btn_filter_menu"):
+            for chip_id, chip_label in getattr(self, "_filter_chip_defs", []):
+                if chip_id == active_chip:
+                    self.btn_filter_menu.setText(f"🔽 {chip_label} ▾")
+                    break
 
         visible_count = 0
         total_count = self.table.rowCount()
@@ -1908,6 +2507,7 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "lbl_filter_count"):
             self.lbl_filter_count.setText(f"{visible_count} / {total_count}")
+        self._sync_empty_state()
 
     def _on_filter_chip_clicked(self, clicked_chip: str):
         for chip_id, btn in self.filter_btn_group.items():
@@ -1940,6 +2540,15 @@ class MainWindow(QMainWindow):
 
     def _on_pause_all(self):
         self.queue_mgr.pause_queue()
+
+    def _apply_limit_badge_style(self, success: bool):
+        """Hız limiti durum rozeti ('Tam Hız' / aktif limit) için kapsül stil."""
+        color = T['success'] if success else T['color_orange']
+        self.lbl_tb_limit_val.setStyleSheet(
+            f"QLabel {{ font-weight: bold; color: {color}; background-color: {T['bg_panel']};"
+            f" border: 1px solid {color}; border-radius: 10px; padding: 4px 8px;"
+            f" min-width: 52px; min-height: 14px; }}"
+        )
 
     def _init_speed_limiter_controls(self):
         """Sync toolbar speed limiter controls with stored DB settings."""
@@ -1974,14 +2583,14 @@ class MainWindow(QMainWindow):
             else:
                 txt = f"{kb_val} KB/s"
             self.lbl_tb_limit_val.setText(txt)
-            self.lbl_tb_limit_val.setStyleSheet("font-weight: bold; color: #ff9e64; min-width: 75px;")
+            self._apply_limit_badge_style(success=False)
             self.lbl_limiter_stat.setText(f"⚡ Hız Sınırı: Aktif ({txt})")
-            self.lbl_limiter_stat.setStyleSheet("color: #ff9e64; font-weight: bold; margin-left: 20px;")
+            self.lbl_limiter_stat.setStyleSheet(f"color: {T['color_orange']}; font-weight: bold; margin-left: 20px;")
         else:
             self.lbl_tb_limit_val.setText("Tam Hız")
-            self.lbl_tb_limit_val.setStyleSheet("font-weight: bold; color: #9ece6a; min-width: 75px;")
+            self._apply_limit_badge_style(success=True)
             self.lbl_limiter_stat.setText("⚡ Hız Sınırı: Kapalı (Tam Hız)")
-            self.lbl_limiter_stat.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 20px;")
+            self.lbl_limiter_stat.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 20px;")
 
     def _on_toolbar_limit_toggled(self, enabled: bool):
         self.slider_tb_limit.setEnabled(enabled)
@@ -2103,11 +2712,14 @@ class MainWindow(QMainWindow):
             # Apply appearance / theme dynamically
             thm_cfg = self.db.get_theme_settings()
             app = QApplication.instance()
-            sheet = get_theme_stylesheet(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue"))
+            from ui import styles as _styles
+            _styles.refresh_tokens(thm_cfg.get("theme", "dark"), thm_cfg.get("accent", "blue"))
+            sheet = _styles.get_app_stylesheet()
             if app:
                 app.setStyleSheet(sheet)
             else:
                 self.setStyleSheet(sheet)
+            self._apply_toolbar_icons()
 
             # Apply UI mode if modified in settings
             self.apply_ui_mode(self.db.get_ui_mode())
@@ -2217,36 +2829,22 @@ class MainWindow(QMainWindow):
         )
 
     def apply_ui_mode(self, mode: str):
-        """Basit Mod veya Gelişmiş Mod görünümünü uygular."""
+        """Basit Mod veya Gelişmiş Mod görünümünü uygular.
+
+        Araç çubuğu her iki modda da sade kalır; Basit modda gizlenen
+        hiçbir işlev kaybolmaz: tümü `⋯ Daha Fazla` menüsünden erişilir.
+        Sürekli ayarlar (hız limiti, zamanlayıcı, sıralı indirme, kuyruk
+        eylemi) ikincil şeritte yalnızca Gelişmiş modda görünür.
+        """
         self.ui_mode = "advanced" if mode == "advanced" else "simple"
         self.db.save_ui_mode(self.ui_mode)
         is_simple = (self.ui_mode == "simple")
 
-        # 1. Toolbar Aksiyonları & Widget'ları
-        adv_actions = [
-            getattr(self, 'act_playlist', None),
-            getattr(self, 'act_batch_add', None),
-            getattr(self, 'act_start_queue', None),
-            getattr(self, 'act_pause_all', None),
-            getattr(self, 'act_scheduler', None),
-            getattr(self, 'act_statistics', None),
-            getattr(self, 'act_clean_missing', None),
-            getattr(self, 'act_extension_widget', None),
-            getattr(self, 'act_conc_widget', None),
-            getattr(self, 'act_sched_widget', None),
-            getattr(self, 'act_limiter_widget', None),
-            getattr(self, 'act_queue_widget', None),
-        ]
-        for act in adv_actions:
-            if act is not None:
-                act.setVisible(not is_simple)
+        # 1. İkincil ayar şeridi yalnızca Gelişmiş modda görünür
+        if hasattr(self, 'quick_bar') and self.quick_bar is not None:
+            self.quick_bar.setVisible(not is_simple)
 
-        # Toolbar Ayırıcıları
-        for sep in getattr(self, 'adv_toolbar_separators', []):
-            if sep is not None:
-                sep.setVisible(not is_simple)
-
-        # 2. Sol Panel (Kategori Ağacı)
+        # 2. Sol panel (Kategori Ağacı): Etiketler / Kuyruklar gelişmiş kalır
         if hasattr(self, 'root_tags') and self.root_tags is not None:
             self.root_tags.setHidden(is_simple)
         if hasattr(self, 'root_queues') and self.root_queues is not None:
@@ -2258,6 +2856,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'filter_btn_group'):
             for btn in self.filter_btn_group.values():
                 btn.setVisible(not is_simple)
+        if hasattr(self, 'btn_filter_menu') and self.btn_filter_menu is not None:
+            self.btn_filter_menu.setVisible(not is_simple)
         if hasattr(self, 'combo_size_filter') and self.combo_size_filter is not None:
             self.combo_size_filter.setVisible(not is_simple)
         if hasattr(self, 'combo_date_filter') and self.combo_date_filter is not None:
@@ -2265,17 +2865,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'lbl_filter_count') and self.lbl_filter_count is not None:
             self.lbl_filter_count.setVisible(not is_simple)
 
-        # 4. Durum Çubuğu
-        if hasattr(self, 'speed_graph') and self.speed_graph is not None:
-            self.speed_graph.setVisible(not is_simple)
-        if hasattr(self, 'lbl_ext_status') and self.lbl_ext_status is not None:
-            self.lbl_ext_status.setVisible(not is_simple)
-        if hasattr(self, 'lbl_limiter_stat') and self.lbl_limiter_stat is not None:
-            self.lbl_limiter_stat.setVisible(not is_simple)
-        if hasattr(self, 'lbl_scheduler_stat') and self.lbl_scheduler_stat is not None:
-            self.lbl_scheduler_stat.setVisible(not is_simple)
-
-        # 5. Tablo Sütunları (Basit modda 6. sütun: Eklenme Tarihi gizlenir)
+        # 4. Tablo Sütunları (Basit modda 7. sütun: Eklenme Tarihi gizlenir)
         if hasattr(self, 'table') and self.table is not None:
             self.table.setColumnHidden(6, is_simple)
 
@@ -2284,38 +2874,38 @@ class MainWindow(QMainWindow):
             if is_simple:
                 self.btn_mode_toggle.setText("🟢 Basit Mod (Geç: Gelişmiş ❯)")
                 self.btn_mode_toggle.setToolTip("Şu an Basit Moddasınız. Tüm gelişmiş araçları görmek için tıklayın.")
-                self.btn_mode_toggle.setStyleSheet("""
-                    QPushButton#btn_mode_toggle {
-                        background-color: #1f2335;
-                        border: 1px solid #9ece6a;
-                        color: #9ece6a;
+                self.btn_mode_toggle.setStyleSheet(f"""
+                    QPushButton#btn_mode_toggle {{
+                        background-color: {T['bg_panel']};
+                        border: 1px solid {T['success']};
+                        color: {T['success']};
                         font-weight: bold;
                         border-radius: 6px;
                         padding: 4px 10px;
                         font-size: 11px;
-                    }
-                    QPushButton#btn_mode_toggle:hover {
-                        background-color: #9ece6a;
-                        color: #1a1b26;
-                    }
+                    }}
+                    QPushButton#btn_mode_toggle:hover {{
+                        background-color: {T['success']};
+                        color: {T['bg_main']};
+                    }}
                 """)
             else:
                 self.btn_mode_toggle.setText("⚡ Gelişmiş Mod (Geç: Basit ❮)")
                 self.btn_mode_toggle.setToolTip("Şu an Gelişmiş Moddasınız. Sade görünüme dönmek için tıklayın.")
-                self.btn_mode_toggle.setStyleSheet("""
-                    QPushButton#btn_mode_toggle {
-                        background-color: #1f2335;
-                        border: 1px solid #bb9af7;
-                        color: #bb9af7;
+                self.btn_mode_toggle.setStyleSheet(f"""
+                    QPushButton#btn_mode_toggle {{
+                        background-color: {T['bg_panel']};
+                        border: 1px solid {T['color_purple']};
+                        color: {T['color_purple']};
                         font-weight: bold;
                         border-radius: 6px;
                         padding: 4px 10px;
                         font-size: 11px;
-                    }
-                    QPushButton#btn_mode_toggle:hover {
-                        background-color: #bb9af7;
-                        color: #1a1b26;
-                    }
+                    }}
+                    QPushButton#btn_mode_toggle:hover {{
+                        background-color: {T['color_purple']};
+                        color: {T['bg_main']};
+                    }}
                 """)
 
         if hasattr(self, 'act_view_simple') and self.act_view_simple is not None:
@@ -2674,7 +3264,7 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.ItemDataRole.UserRole, f"queue:{q['id']}")
             self.root_queues.addChild(item)
 
-        item_add = QTreeWidgetItem(["  ➕ Yeni Kuyruk Oluştur..."])
+        item_add = QTreeWidgetItem(["➕ Yeni Kuyruk Oluştur…"])
         item_add.setData(0, Qt.ItemDataRole.UserRole, "__ADD_QUEUE__")
         self.root_queues.addChild(item_add)
 
@@ -3040,12 +3630,12 @@ class MainWindow(QMainWindow):
         if free_bytes >= 0:
             self.lbl_disk_stat.setText(f"💾 {drive}: {format_size(free_bytes)} Boş")
             if free_bytes < 1024 * 1024 * 1024:  # < 1 GB
-                self.lbl_disk_stat.setStyleSheet("color: #f7768e; font-weight: bold; margin-left: 15px;")
+                self.lbl_disk_stat.setStyleSheet(f"color: {T['danger']}; font-weight: bold; margin-left: 15px;")
             else:
-                self.lbl_disk_stat.setStyleSheet("color: #7dcfff; font-weight: bold; margin-left: 15px;")
+                self.lbl_disk_stat.setStyleSheet(f"color: {T['color_cyan']}; font-weight: bold; margin-left: 15px;")
         else:
             self.lbl_disk_stat.setText("💾 Disk: Bilgi alınamadı")
-            self.lbl_disk_stat.setStyleSheet("color: #ff9e64; font-weight: bold; margin-left: 15px;")
+            self.lbl_disk_stat.setStyleSheet(f"color: {T['color_orange']}; font-weight: bold; margin-left: 15px;")
 
     def _show_statistics_dialog(self):
         default_dir = self.db.get_setting("default_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
@@ -3129,15 +3719,15 @@ class MainWindow(QMainWindow):
         # Update status bar
         if not info["enabled"]:
             self.lbl_scheduler_stat.setText("⏱ Zamanlayıcı: Kapalı")
-            self.lbl_scheduler_stat.setStyleSheet("color: #7982a9; font-weight: bold; margin-left: 20px;")
+            self.lbl_scheduler_stat.setStyleSheet(f"color: {T['text_secondary']}; font-weight: bold; margin-left: 20px;")
         elif info["is_in_window"]:
             txt = f"⏱ Zamanlayıcı: {info['state_text']} (Kalan: {info['time_remaining_str']})"
             self.lbl_scheduler_stat.setText(txt)
-            self.lbl_scheduler_stat.setStyleSheet("color: #9ece6a; font-weight: bold; margin-left: 20px;")
+            self.lbl_scheduler_stat.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 20px;")
         else:
             txt = f"⏱ Zamanlayıcı: {info['state_text']} (Kalan: {info['time_remaining_str']})"
             self.lbl_scheduler_stat.setText(txt)
-            self.lbl_scheduler_stat.setStyleSheet("color: #e0af68; font-weight: bold; margin-left: 20px;")
+            self.lbl_scheduler_stat.setStyleSheet(f"color: {T['warning']}; font-weight: bold; margin-left: 20px;")
 
         self.tray.update_scheduler_ui(info["enabled"], info.get("state_text", ""))
 
@@ -3153,13 +3743,13 @@ class MainWindow(QMainWindow):
 
         if not en:
             self.lbl_tb_sched_badge.setText("Kapalı")
-            self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #7982a9; min-width: 60px;")
+            self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['text_secondary']}; min-width: 60px;")
         elif info.get("is_in_window"):
             self.lbl_tb_sched_badge.setText("İndiriliyor")
-            self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #9ece6a; min-width: 60px;")
+            self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['success']}; min-width: 60px;")
         else:
             self.lbl_tb_sched_badge.setText("Beklemede")
-            self.lbl_tb_sched_badge.setStyleSheet("font-weight: bold; color: #e0af68; min-width: 60px;")
+            self.lbl_tb_sched_badge.setStyleSheet(f"font-weight: bold; color: {T['warning']}; min-width: 60px;")
 
     def _handle_scheduler_started(self):
         self.tray.showMessage(
@@ -3199,6 +3789,7 @@ class MainWindow(QMainWindow):
 
     def _quit_application(self):
         """Cleanly quits the application from tray menu."""
+        self._save_geometry()
         try:
             self.queue_manager.flush_progress()
         except Exception:
@@ -3213,6 +3804,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().quit()
 
     def closeEvent(self, event):
+        self._save_geometry()
         # Check setting: minimize to tray or quit
         close_to_tray = bool(self.db.get_setting("close_to_tray", True))
         if close_to_tray:

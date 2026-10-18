@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 from core.database import Database
 from core.categories import detect_category, get_categorized_save_dir
-from core.downloader import MultiThreadDownloader
+from core.downloader import MultiThreadDownloader, clean_http_headers
 from core.stream_downloader import StreamDownloader, is_stream_url
 from core.paths import resolve_file_conflict, sanitize_filename, get_disk_free_space, is_path_too_long, suggest_short_download_dir, to_long_path
 from core.post_download import execute_post_download
@@ -289,7 +289,7 @@ class QueueManager:
                     filename=f_name,
                     connections=conns,
                     quality=sel_quality,
-                    headers=req_headers,
+                    headers=clean_http_headers(req_headers),
                     speed_limit_bps=self.global_speed_limit_bps,
                     proxy=proxy_url,
                     browser_cookies=browser_cookies if browser_cookies else None,
@@ -309,7 +309,7 @@ class QueueManager:
                     save_dir=s_dir,
                     filename=f_name,
                     connections=conns,
-                    headers=req_headers,
+                    headers=clean_http_headers(req_headers),
                     speed_limit_bps=self.global_speed_limit_bps,
                     proxy=proxy_url,
                     auto_retry=auto_retry_en,

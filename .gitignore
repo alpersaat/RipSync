@@ -33,8 +33,22 @@ semgrep-rapor.json
 
 # Local database & user data files (NEVER commit local download history)
 downloads.db
-downloads.db-journal
-downloads.db-wal
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Uygulamanın ürettiği köprü ayarı (port + token kuruluma özel)
+extension/config.json
+
+# Araç çıktıları (graphify, linter, tip denetimi)
+graphify-out/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Playwright / e2e çıktıları
+test-results/
+playwright-report/
 *.db
 
 # Virtual environments

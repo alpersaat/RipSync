@@ -7,19 +7,19 @@ from PyQt6.QtWidgets import (
     QProgressBar, QScrollArea, QWidget
 )
 
-from ui.styles import format_size
+from ui.styles import format_size, T
 from core.database import Database
 from core.paths import get_disk_total_and_free
 
 
 class StatCard(QFrame):
     """Modern metric card with title, large value, and subtle icon/subtext."""
-    def __init__(self, title: str, value: str, subtext: str = "", accent_color: str = "#7aa2f7", parent=None):
+    def __init__(self, title: str, value: str, subtext: str = "", accent_color: str = T['accent'], parent=None):
         super().__init__(parent)
         self.setStyleSheet(f"""
             QFrame {{
-                background-color: #1f2335;
-                border: 1px solid #3b4261;
+                background-color: {T['bg_panel']};
+                border: 1px solid {T['border']};
                 border-radius: 8px;
                 padding: 10px;
             }}
@@ -32,7 +32,7 @@ class StatCard(QFrame):
         layout.setSpacing(4)
 
         lbl_title = QLabel(title)
-        lbl_title.setStyleSheet("color: #7982a9; font-size: 11px; font-weight: bold;")
+        lbl_title.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px; font-weight: bold;")
         layout.addWidget(lbl_title)
 
         lbl_val = QLabel(value)
@@ -41,7 +41,7 @@ class StatCard(QFrame):
 
         if subtext:
             lbl_sub = QLabel(subtext)
-            lbl_sub.setStyleSheet("color: #a9b1d6; font-size: 11px;")
+            lbl_sub.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px;")
             layout.addWidget(lbl_sub)
 
 
@@ -68,7 +68,7 @@ class StatisticsDialog(QDialog):
 
         # Header Title
         lbl_header = QLabel("📊 İndirme İstatistikleri ve Ağ Trafiği")
-        lbl_header.setStyleSheet("color: #c0caf5; font-size: 15px; font-weight: bold;")
+        lbl_header.setStyleSheet(f"color: {T['text_primary']}; font-size: 15px; font-weight: bold;")
         main_layout.addWidget(lbl_header)
 
         # Key Metrics Grid (4 Cards)
@@ -88,7 +88,7 @@ class StatisticsDialog(QDialog):
         f_disk.setSpacing(6)
 
         self.lbl_disk_info = QLabel("Sürücü taranıyor...")
-        self.lbl_disk_info.setStyleSheet("color: #c0caf5; font-weight: bold;")
+        self.lbl_disk_info.setStyleSheet(f"color: {T['text_primary']}; font-weight: bold;")
         f_disk.addWidget(self.lbl_disk_info)
 
         self.bar_disk = QProgressBar()
@@ -96,20 +96,20 @@ class StatisticsDialog(QDialog):
         self.bar_disk.setValue(0)
         self.bar_disk.setTextVisible(True)
         self.bar_disk.setFixedHeight(18)
-        self.bar_disk.setStyleSheet("""
-            QProgressBar {
-                background-color: #1f2335;
-                border: 1px solid #3b4261;
+        self.bar_disk.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {T['bg_panel']};
+                border: 1px solid {T['border']};
                 border-radius: 4px;
                 text-align: center;
-                color: #ffffff;
+                color: {T['text_on_accent']};
                 font-size: 10px;
                 font-weight: bold;
-            }
-            QProgressBar::chunk {
-                background-color: #7aa2f7;
+            }}
+            QProgressBar::chunk {{
+                background-color: {T['accent']};
                 border-radius: 3px;
-            }
+            }}
         """)
         f_disk.addWidget(self.bar_disk)
 
@@ -146,7 +146,7 @@ class StatisticsDialog(QDialog):
             title="TOPLAM VERİ TRAFİĞİ",
             value=format_size(comp_bytes),
             subtext="Tamamlanan indirmelerin toplamı",
-            accent_color="#9ece6a"
+            accent_color=T['success']
         )
         self.grid_cards.addWidget(card1, 0, 0)
 
@@ -157,7 +157,7 @@ class StatisticsDialog(QDialog):
             title="TAMAMLANAN DOSYALAR",
             value=f"{comp_count} Adet",
             subtext=f"Toplam {tot_count} görevden",
-            accent_color="#7aa2f7"
+            accent_color=T['accent']
         )
         self.grid_cards.addWidget(card2, 0, 1)
 
@@ -168,7 +168,7 @@ class StatisticsDialog(QDialog):
             title="BUGÜNKÜ TRAFİK",
             value=format_size(today_bytes),
             subtext=f"Bugün tamamlanan: {today_count} dosya",
-            accent_color="#2ac3de"
+            accent_color=T['color_sky']
         )
         self.grid_cards.addWidget(card3, 1, 0)
 
@@ -179,7 +179,7 @@ class StatisticsDialog(QDialog):
             title="KUYRUK VE AKTİF",
             value=f"{active} İnen / {queued} Sırada",
             subtext=f"Duraklatılan: {stats.get('paused_count', 0)} | Hatalı: {stats.get('error_count', 0)}",
-            accent_color="#bb9af7"
+            accent_color=T['color_purple']
         )
         self.grid_cards.addWidget(card4, 1, 1)
 
@@ -202,7 +202,7 @@ class StatisticsDialog(QDialog):
 
         if not cats:
             lbl_empty = QLabel("Henüz kategori verisi bulunmuyor.")
-            lbl_empty.setStyleSheet("color: #7982a9; font-style: italic;")
+            lbl_empty.setStyleSheet(f"color: {T['text_secondary']}; font-style: italic;")
             self.cat_layout.addWidget(lbl_empty)
         else:
             for cat_key, count in cats.items():
@@ -214,7 +214,7 @@ class StatisticsDialog(QDialog):
                 r_layout.setContentsMargins(0, 2, 0, 2)
 
                 lbl_cat_name = QLabel(label_text)
-                lbl_cat_name.setStyleSheet("color: #c0caf5; font-size: 12px; min-width: 140px;")
+                lbl_cat_name.setStyleSheet(f"color: {T['text_primary']}; font-size: 12px; min-width: 140px;")
                 r_layout.addWidget(lbl_cat_name)
 
                 pbar = QProgressBar()
@@ -222,21 +222,21 @@ class StatisticsDialog(QDialog):
                 pbar.setValue(pct)
                 pbar.setFixedHeight(12)
                 pbar.setTextVisible(False)
-                pbar.setStyleSheet("""
-                    QProgressBar {
-                        background-color: #1f2335;
-                        border: 1px solid #3b4261;
+                pbar.setStyleSheet(f"""
+                    QProgressBar {{
+                        background-color: {T['bg_panel']};
+                        border: 1px solid {T['border']};
                         border-radius: 3px;
-                    }
-                    QProgressBar::chunk {
-                        background-color: #7aa2f7;
+                    }}
+                    QProgressBar::chunk {{
+                        background-color: {T['accent']};
                         border-radius: 2px;
-                    }
+                    }}
                 """)
                 r_layout.addWidget(pbar, stretch=1)
 
                 lbl_cat_val = QLabel(f"{count} dosya (%{pct})")
-                lbl_cat_val.setStyleSheet("color: #a9b1d6; font-size: 11px; min-width: 100px; text-align: right;")
+                lbl_cat_val.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px; min-width: 100px; text-align: right;")
                 r_layout.addWidget(lbl_cat_val)
 
                 self.cat_layout.addWidget(row_w)
@@ -252,9 +252,9 @@ class StatisticsDialog(QDialog):
             )
             self.bar_disk.setValue(used_pct)
             if used_pct >= 90:
-                self.bar_disk.setStyleSheet(self.bar_disk.styleSheet().replace("#7aa2f7", "#f7768e"))
+                self.bar_disk.setStyleSheet(self.bar_disk.styleSheet().replace(T['accent'], T['danger']))
             elif used_pct >= 75:
-                self.bar_disk.setStyleSheet(self.bar_disk.styleSheet().replace("#7aa2f7", "#e0af68"))
+                self.bar_disk.setStyleSheet(self.bar_disk.styleSheet().replace(T['accent'], T['warning']))
         else:
             self.lbl_disk_info.setText(f"Kayıt Klasörü: {self.default_download_dir}")
 

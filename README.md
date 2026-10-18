@@ -234,6 +234,8 @@ Tarayıcınız ile masaüstü uygulamasını entegre etmek için:
 5. RipSync kurulum dizinindeki veya proje içerisindeki **`extension`** klasörünü seçin.
 6. Eklenti anında kurulacaktır. Eklenti simgesine tıkladığınızda **"🟢 Masaüstü Uygulaması Bağlı"** durumunu göreceksiniz.
 
+> Not: `extension/config.json` repoda yoktur; masaüstü uygulaması ilk çalıştırmada köprü portunu ve güvenli token'ı bu dosyaya kendisi yazar (örnek için `extension/config.json.example`).
+
 ---
 
 ## 💻 Geliştiriciler İçin Kaynak Koddan Çalıştırma

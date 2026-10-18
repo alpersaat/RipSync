@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QFrame
 )
 from PyQt6.QtCore import Qt
-from ui.styles import format_size
+from ui.styles import format_size, T
 
 
 class DeleteConfirmDialog(QDialog):
@@ -57,27 +57,27 @@ class DeleteConfirmDialog(QDialog):
 
         # 1. VARSAYILAN DAVRANIŞ BİLGİ KARTİ (Çok net ve görünür)
         self.banner_default = QFrame()
-        self.banner_default.setStyleSheet("""
-            QFrame {
-                background-color: #1a233a;
-                border: 1px solid #7aa2f7;
+        self.banner_default.setStyleSheet(f"""
+            QFrame {{
+                background-color: {T['info_bg']};
+                border: 1px solid {T['accent']};
                 border-radius: 6px;
                 padding: 10px;
-            }
+            }}
         """)
         banner_layout = QVBoxLayout(self.banner_default)
         banner_layout.setContentsMargins(10, 8, 10, 8)
         banner_layout.setSpacing(4)
 
         lbl_banner_title = QLabel("ℹ️ VARSAYILAN DAVRANIŞ: İNDİRİLEN DOSYA DİSKTE KORUNUR")
-        lbl_banner_title.setStyleSheet("color: #7aa2f7; font-weight: bold; font-size: 13px;")
+        lbl_banner_title.setStyleSheet(f"color: {T['accent']}; font-weight: bold; font-size: 13px;")
         banner_layout.addWidget(lbl_banner_title)
 
         lbl_banner_desc = QLabel(
             "Bu işlem indirme kaydını RipSync listesinden ve geçmişinden kaldırır.<br>"
             "<b>Varsayılan olarak dosyanız bilgisayarınızın diskinde kalmaya devam eder.</b>"
         )
-        lbl_banner_desc.setStyleSheet("color: #c0caf5; font-size: 12px; line-height: 1.4;")
+        lbl_banner_desc.setStyleSheet(f"color: {T['text_primary']}; font-size: 12px; line-height: 1.4;")
         lbl_banner_desc.setWordWrap(True)
         banner_layout.addWidget(lbl_banner_desc)
 
@@ -106,15 +106,15 @@ class DeleteConfirmDialog(QDialog):
                 except Exception:
                     size_str = "Bilinmiyor"
                 lbl_disk = QLabel(f"💾 <b>Diskte Mevcut</b> ({size_str})")
-                lbl_disk.setStyleSheet("color: #9ece6a; font-weight: bold;")
+                lbl_disk.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
             else:
                 lbl_disk = QLabel("⚠️ Diskte henüz dosya yok veya taşınmış")
-                lbl_disk.setStyleSheet("color: #e0af68;")
+                lbl_disk.setStyleSheet(f"color: {T['warning']};")
             form_info.addRow("Disk Durumu:", lbl_disk)
 
             if spath:
                 lbl_path = QLabel(spath)
-                lbl_path.setStyleSheet("color: #a9b1d6; font-size: 11px;")
+                lbl_path.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px;")
                 lbl_path.setWordWrap(True)
                 form_info.addRow("Konum:", lbl_path)
 
@@ -128,27 +128,27 @@ class DeleteConfirmDialog(QDialog):
 
             form_info.addRow("Öğe Sayısı:", QLabel(f"<b>{self.count} adet indirme seçildi</b>"))
             lbl_list = QLabel(preview)
-            lbl_list.setStyleSheet("color: #a9b1d6; font-size: 11px;")
+            lbl_list.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px;")
             lbl_list.setWordWrap(True)
             form_info.addRow("Dosyalar:", lbl_list)
 
             # Diskte kaç tanesi var
             existing_count = sum(1 for r in self.downloads if r.get("save_path") and os.path.exists(r["save_path"]))
             lbl_disk = QLabel(f"💾 {existing_count} / {self.count} dosya disk üzerinde mevcut")
-            lbl_disk.setStyleSheet("color: #9ece6a;" if existing_count > 0 else "color: #e0af68;")
+            lbl_disk.setStyleSheet(f"color: {T['success']};" if existing_count > 0 else f"color: {T['warning']};")
             form_info.addRow("Disk Durumu:", lbl_disk)
 
         layout.addWidget(grp_info)
 
         # 3. DOSYAYI DA SİLME ONAY KUTUSU (Görünür Seçenek)
         self.chk_delete_file = QCheckBox("💥 İndirilen dosyayı da diskten kalıcı olarak sil (delete_file)")
-        self.chk_delete_file.setStyleSheet("""
-            QCheckBox {
+        self.chk_delete_file.setStyleSheet(f"""
+            QCheckBox {{
                 font-weight: bold;
                 font-size: 12px;
-                color: #f7768e;
+                color: {T['danger']};
                 padding: 4px 0;
-            }
+            }}
         """)
         self.chk_delete_file.toggled.connect(self._on_chk_toggled)
         layout.addWidget(self.chk_delete_file)
@@ -168,17 +168,17 @@ class DeleteConfirmDialog(QDialog):
         # Buton 1: Listeden Kaldır (Varsayılan Odak)
         self.btn_remove_list = QPushButton("🗑 Yalnızca Listeden Kaldır")
         self.btn_remove_list.setToolTip("İndirme kaydını siler, indirilen dosya diskte korunur.")
-        self.btn_remove_list.setStyleSheet("""
-            QPushButton {
-                background-color: #3d59a1;
-                color: #ffffff;
+        self.btn_remove_list.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['accent_primary']};
+                color: {T['text_on_accent']};
                 font-weight: bold;
                 padding: 8px 14px;
                 border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #4e75c7;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['accent_hover']};
+            }}
         """)
         self.btn_remove_list.clicked.connect(self._on_remove_list_clicked)
         btn_layout.addWidget(self.btn_remove_list)
@@ -186,18 +186,18 @@ class DeleteConfirmDialog(QDialog):
         # Buton 2: Dosyayla Birlikte Sil (Kalıcı Silme)
         self.btn_delete_both = QPushButton("💥 Dosyayla Birlikte Sil")
         self.btn_delete_both.setToolTip("Hem listeden hem de bilgisayarınızın diskinden kalıcı olarak siler.")
-        self.btn_delete_both.setStyleSheet("""
-            QPushButton {
-                background-color: #7a2233;
-                color: #ffffff;
+        self.btn_delete_both.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['danger']};
+                color: {T['text_on_accent']};
                 font-weight: bold;
                 padding: 8px 14px;
                 border-radius: 5px;
-                border: 1px solid #f7768e;
-            }
-            QPushButton:hover {
-                background-color: #c53b53;
-            }
+                border: 1px solid {T['danger']};
+            }}
+            QPushButton:hover {{
+                background-color: {T['danger']};
+            }}
         """)
         self.btn_delete_both.clicked.connect(self._on_delete_both_clicked)
         btn_layout.addWidget(self.btn_delete_both)
@@ -206,17 +206,17 @@ class DeleteConfirmDialog(QDialog):
 
         # Buton 3: Vazgeç
         self.btn_cancel = QPushButton("Vazgeç")
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #24283b;
-                color: #c0caf5;
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['bg_card']};
+                color: {T['text_primary']};
                 padding: 8px 16px;
                 border-radius: 5px;
-                border: 1px solid #414868;
-            }
-            QPushButton:hover {
-                background-color: #2f354f;
-            }
+                border: 1px solid {T['border']};
+            }}
+            QPushButton:hover {{
+                background-color: {T['bg_hover']};
+            }}
         """)
         self.btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_cancel)
@@ -230,40 +230,40 @@ class DeleteConfirmDialog(QDialog):
         checked = self.chk_delete_file.isChecked()
         if checked:
             self.lbl_status_desc.setText(
-                "<span style='color: #f7768e; font-weight: bold;'>⚠️ Dikkat:</span> "
-                "<span style='color: #f7768e;'>İndirilen dosya(lar) kalıcı olarak diskten silinecektir!</span>"
+                f"<span style='color: {T['danger']}; font-weight: bold;'>⚠️ Dikkat:</span> "
+                f"<span style='color: {T['danger']};'>İndirilen dosya(lar) kalıcı olarak diskten silinecektir!</span>"
             )
             self.btn_remove_list.setText("💥 Dosyayla Birlikte Sil")
-            self.btn_remove_list.setStyleSheet("""
-                QPushButton {
-                    background-color: #c53b53;
-                    color: #ffffff;
+            self.btn_remove_list.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {T['danger']};
+                    color: {T['text_on_accent']};
                     font-weight: bold;
                     padding: 8px 14px;
                     border-radius: 5px;
-                    border: 1px solid #f7768e;
-                }
-                QPushButton:hover {
-                    background-color: #db4b63;
-                }
+                    border: 1px solid {T['danger']};
+                }}
+                QPushButton:hover {{
+                    background-color: {T['danger']};
+                }}
             """)
         else:
             self.lbl_status_desc.setText(
-                "<span style='color: #9ece6a; font-weight: bold;'>✓ Güvenli:</span> "
-                "<span style='color: #c0caf5;'>Dosya diskte korunacaktır, yalnızca listeden kaldırılır.</span>"
+                f"<span style='color: {T['success']}; font-weight: bold;'>✓ Güvenli:</span> "
+                f"<span style='color: {T['text_primary']};'>Dosya diskte korunacaktır, yalnızca listeden kaldırılır.</span>"
             )
             self.btn_remove_list.setText("🗑 Yalnızca Listeden Kaldır")
-            self.btn_remove_list.setStyleSheet("""
-                QPushButton {
-                    background-color: #3d59a1;
-                    color: #ffffff;
+            self.btn_remove_list.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {T['accent_primary']};
+                    color: {T['text_on_accent']};
                     font-weight: bold;
                     padding: 8px 14px;
                     border-radius: 5px;
-                }
-                QPushButton:hover {
-                    background-color: #4e75c7;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {T['accent_hover']};
+                }}
             """)
 
     def _on_remove_list_clicked(self):

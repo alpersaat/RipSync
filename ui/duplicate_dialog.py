@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QGroupBox, QFormLayout, QCheckBox
 )
 from PyQt6.QtCore import Qt
-from ui.styles import format_size
+from ui.styles import format_size, T
 from core.paths import show_in_explorer
 
 
@@ -40,16 +40,16 @@ class DuplicateDownloadDialog(QDialog):
 
         # Header warning banner
         lbl_banner = QLabel("⚠️ Bu dosya veya bağlantı daha önce indirilmiş ya da listenizde mevcut!")
-        lbl_banner.setStyleSheet("""
-            QLabel {
-                background-color: #2b221a;
-                color: #ff9e64;
+        lbl_banner.setStyleSheet(f"""
+            QLabel {{
+                background-color: {T['warning_bg']};
+                color: {T['color_orange']};
                 font-weight: bold;
                 font-size: 13px;
                 padding: 10px 14px;
                 border-radius: 6px;
-                border: 1px solid #ff9e64;
-            }
+                border: 1px solid {T['color_orange']};
+            }}
         """)
         layout.addWidget(lbl_banner)
 
@@ -87,7 +87,7 @@ class DuplicateDownloadDialog(QDialog):
         file_exists = bool(save_path and os.path.exists(save_path))
         disk_status = "✅ Diskte Mevcut" if file_exists else "⚠️ Diskte Bulunamadı (Silinmiş/Taşınmış)"
         lbl_disk = QLabel(disk_status)
-        lbl_disk.setStyleSheet("color: #9ece6a;" if file_exists else "color: #f7768e;")
+        lbl_disk.setStyleSheet(f"color: {T['success']};" if file_exists else f"color: {T['danger']};")
         form.addRow("Kayıt Konumu:", lbl_disk)
 
         layout.addWidget(grp)
@@ -106,7 +106,7 @@ class DuplicateDownloadDialog(QDialog):
         btn_layout.addStretch()
 
         self.btn_redownload = QPushButton("🔄 Yeniden İndir")
-        self.btn_redownload.setStyleSheet("background-color: #7aa2f7; color: #1a1b26; font-weight: bold; padding: 6px 14px;")
+        self.btn_redownload.setStyleSheet(f"background-color: {T['accent']}; color: {T['bg_main']}; font-weight: bold; padding: 6px 14px;")
         self.btn_redownload.clicked.connect(self._on_redownload)
         btn_layout.addWidget(self.btn_redownload)
 

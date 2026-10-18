@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMessageBox
 )
 
-from ui.styles import format_size, format_speed, format_eta
+from ui.styles import format_size, format_speed, format_eta, T
 from core.paths import show_in_explorer
 
 
@@ -36,7 +36,7 @@ class DownloadPropertiesDialog(QDialog):
 
         fname = self.rec.get("filename", "--")
         lbl_name = QLabel(fname)
-        lbl_name.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 13px;")
+        lbl_name.setStyleSheet(f"font-weight: bold; color: {T['accent']}; font-size: 13px;")
         lbl_name.setWordWrap(True)
         f_file.addRow("Dosya Adı:", lbl_name)
 
@@ -66,19 +66,19 @@ class DownloadPropertiesDialog(QDialog):
         pct_val = int((done / tot) * 100) if tot > 0 else (100 if status == "Completed" else 0)
 
         lbl_sizes = QLabel(f"{done_str} / {size_str} (%{pct_val})")
-        lbl_sizes.setStyleSheet("color: #9ece6a; font-weight: bold;")
+        lbl_sizes.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
         f_file.addRow("İndirilen / Toplam:", lbl_sizes)
 
         # Status Badge
         lbl_status = QLabel(status)
         if status == "Completed":
-            lbl_status.setStyleSheet("color: #9ece6a; font-weight: bold;")
+            lbl_status.setStyleSheet(f"color: {T['success']}; font-weight: bold;")
         elif status in ("Downloading", "Probing", "Retrying"):
-            lbl_status.setStyleSheet("color: #7aa2f7; font-weight: bold;")
+            lbl_status.setStyleSheet(f"color: {T['accent']}; font-weight: bold;")
         elif status == "Paused":
-            lbl_status.setStyleSheet("color: #e0af68; font-weight: bold;")
+            lbl_status.setStyleSheet(f"color: {T['warning']}; font-weight: bold;")
         else:
-            lbl_status.setStyleSheet("color: #f7768e; font-weight: bold;")
+            lbl_status.setStyleSheet(f"color: {T['danger']}; font-weight: bold;")
         f_file.addRow("İndirme Durumu:", lbl_status)
 
         layout.addWidget(grp_file)
@@ -112,9 +112,13 @@ class DownloadPropertiesDialog(QDialog):
         f_net.addRow("Yönlendiren (Referer):", ref_row)
 
         conns = self.rec.get("connections", 8)
-        lbl_conns = QLabel(f"{conns} Eşzamanlı Parça / Bağlantı (Range Split)")
-        lbl_conns.setStyleSheet("color: #bb9af7;")
-        f_net.addRow("Kanal Sayısı:", lbl_conns)
+        from ui.language import label_pair
+        lbl_conns = QLabel(label_pair(
+            f"{conns} parça (aynı anda iniyor, kaldığı yerden devam eder)",
+            f"{conns} Eşzamanlı Parça / Bağlantı (Range Split)"
+        ))
+        lbl_conns.setStyleSheet(f"color: {T['color_purple']};")
+        f_net.addRow(label_pair("Parça Sayısı:", "Kanal Sayısı:"), lbl_conns)
 
         quality = self.rec.get("quality", "max")
         lbl_quality = QLabel(quality.upper() if quality else "Maksimum")
@@ -122,11 +126,11 @@ class DownloadPropertiesDialog(QDialog):
 
         prio = (self.rec.get("priority") or "normal").lower()
         prio_map = {
-            "high": ("🚀 Yüksek Öncelik (%70 Hız Payı)", "#7aa2f7"),
-            "normal": ("⚖️ Normal Öncelik (Dengeli)", "#9ece6a"),
-            "low": ("🐢 Düşük Öncelik (Arka Plan - %10 Hız Payı)", "#e0af68")
+            "high": ("🚀 Yüksek Öncelik (%70 Hız Payı)", T['accent']),
+            "normal": ("⚖️ Normal Öncelik (Dengeli)", T['success']),
+            "low": ("🐢 Düşük Öncelik (Arka Plan - %10 Hız Payı)", T['warning'])
         }
-        p_txt, p_col = prio_map.get(prio, ("⚖️ Normal", "#9ece6a"))
+        p_txt, p_col = prio_map.get(prio, ("⚖️ Normal", T['success']))
         lbl_prio = QLabel(p_txt)
         lbl_prio.setStyleSheet(f"color: {p_col}; font-weight: bold;")
         f_net.addRow("Bant Genişliği Önceliği:", lbl_prio)
@@ -143,7 +147,7 @@ class DownloadPropertiesDialog(QDialog):
 
         spd = self.rec.get("speed", 0)
         lbl_speed = QLabel(format_speed(spd) if spd > 0 else "--")
-        lbl_speed.setStyleSheet("color: #7aa2f7; font-weight: bold;")
+        lbl_speed.setStyleSheet(f"color: {T['accent']}; font-weight: bold;")
         f_time.addRow("Anlık / Son Hız:", lbl_speed)
 
         eta = self.rec.get("eta", 0)

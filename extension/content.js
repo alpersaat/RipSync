@@ -399,6 +399,89 @@
     requestAnimationFrame(updateAll);
   }
 
+  // --- Suggested filename helpers -------------------------------------------
+  // Önceden dosya adı yalnızca document.title'dan üretiliyordu; akış (feed)
+  // sayfalarında bu "Anasayfa _ X.mp4" gibi anlamsız adlar veriyordu. Artık
+  // önce videonun kendi bağlamı (tweet metni/yazarı), sonra sayfa meta verisi
+  // kullanılır; akış başlıkları reddedilir.
+  const GENERIC_TITLE_RE = /^(anasayfa|home|akış|akis|feed|explore|keşfet|kesfet|bildirimler|notifications|profil|profile|video|videos|shorts|watch|izle|download|indir|x|twitter|tiktok|instagram|youtube|media)$/i;
+
+  function sanitizeNamePart(text) {
+    return (text || "")
+      .replace(/[\\/:*?"<>|\r\n\t]+/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/^[\s._-]+|[\s._-]+$/g, "")
+      .slice(0, 80)
+      .trim();
+  }
+
+  function cleanPageTitle(title) {
+    return sanitizeNamePart(
+      (title || "").replace(/\s*[\/|•·-]\s*(X|Twitter|TikTok|Instagram|YouTube)\s*$/i, "")
+    );
+  }
+
+  function isGenericTitle(title) {
+    const t = cleanPageTitle(title);
+    return !t || GENERIC_TITLE_RE.test(t);
+  }
+
+  function metaContent(selector) {
+    try {
+      const el = document.querySelector(selector);
+      return el && el.content ? el.content : "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function nearbyMediaName(mediaElem) {
+    try {
+      const article = mediaElem.closest("article");
+      if (!article) return "";
+      const textEl = article.querySelector('[data-testid="tweetText"]');
+      const text = sanitizeNamePart(textEl ? textEl.textContent : "");
+      let author = "";
+      const authorLink = article.querySelector('a[href^="/"][role="link"]');
+      if (authorLink) {
+        const span = authorLink.querySelector("span");
+        author = sanitizeNamePart(span ? span.textContent : authorLink.textContent);
+      }
+      if (text) return author ? `${author} - ${text}` : text;
+      if (author) return `${author} videosu`;
+    } catch (e) {}
+    return "";
+  }
+
+  function suggestFilename(mediaElem, ext) {
+    const host = (window.location.hostname || "").toLowerCase();
+    const pageTitle = cleanPageTitle(metaContent('meta[property="og:title"]') || metaContent('meta[name="twitter:title"]'));
+    let base = "";
+
+    if (host.includes("x.com") || host.includes("twitter.com")) {
+      base = nearbyMediaName(mediaElem);
+      if (!base) {
+        const statusUrl = findTweetStatusUrl(mediaElem) || window.location.href;
+        const m = String(statusUrl).match(/\/status\/(\d+)/);
+        if (m) base = `X video ${m[1]}`;
+      }
+      if (!base && !isGenericTitle(pageTitle)) base = pageTitle;
+    } else if (host.includes("tiktok.com")) {
+      base = isGenericTitle(pageTitle) ? "TikTok videosu" : pageTitle;
+    } else if (host.includes("instagram.com")) {
+      base = isGenericTitle(pageTitle) ? "Instagram videosu" : pageTitle;
+    } else if (!isGenericTitle(pageTitle)) {
+      base = pageTitle;
+    }
+
+    if (!base) {
+      const docTitle = cleanPageTitle(document.title);
+      if (!isGenericTitle(docTitle)) base = docTitle;
+    }
+    if (!base) base = "video";
+    return sanitizeNamePart(base) + ext;
+  }
+
   function createButton(mediaElem) {
     const btn = document.createElement("div");
     btn.className = "ripsync-sniffer-btn";
@@ -523,8 +606,7 @@
       menu.classList.remove("show");
       btn.classList.remove("open");
 
-      const baseTitle = document.title.replace(/[\/\\?%*:|"<>]/g, '_').slice(0, 100).trim() || "video";
-      const suggestedName = baseTitle + ext;
+      const suggestedName = suggestFilename(mediaElem, ext);
 
       try {
         chrome.runtime.sendMessage({

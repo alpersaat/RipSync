@@ -3,7 +3,7 @@ from PyQt6.QtCore import Qt, QPointF
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QPen, QLinearGradient, QFont
 from PyQt6.QtWidgets import QWidget
 
-from ui.styles import format_speed
+from ui.styles import format_speed, T
 
 
 class BandwidthGraphWidget(QWidget):
@@ -45,8 +45,8 @@ class BandwidthGraphWidget(QWidget):
         h = self.height()
 
         # Background rounded card
-        bg_color = QColor("#16161e")
-        border_color = QColor("#292e42")
+        bg_color = QColor(T['code_bg'])
+        border_color = QColor(T['bg_hover'])
         painter.setBrush(bg_color)
         painter.setPen(QPen(border_color, 1))
         painter.drawRoundedRect(0, 0, w - 1, h - 1, 4, 4)
@@ -97,7 +97,7 @@ class BandwidthGraphWidget(QWidget):
             line_path.lineTo(pt)
 
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor("#7aa2f7"), 1.4))
+        painter.setPen(QPen(QColor(T['accent']), 1.4))
         painter.drawPath(line_path)
 
         # Draw peak text overlay if active

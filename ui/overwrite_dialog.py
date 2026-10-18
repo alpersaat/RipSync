@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QGroupBox, QFormLayout
 )
 from PyQt6.QtCore import Qt
-from ui.styles import format_size
+from ui.styles import format_size, T
 from core.paths import resolve_file_conflict
 
 
@@ -43,16 +43,16 @@ class OverwriteConfirmDialog(QDialog):
 
         # Header alert banner
         lbl_banner = QLabel("⚠️ DİKKAT: Hedef klasörde aynı isimde bir dosya zaten mevcut!")
-        lbl_banner.setStyleSheet("""
-            QLabel {
-                background-color: #2b1f1f;
-                color: #f7768e;
+        lbl_banner.setStyleSheet(f"""
+            QLabel {{
+                background-color: {T['warning_bg']};
+                color: {T['danger']};
                 font-weight: bold;
                 font-size: 13px;
                 padding: 10px 14px;
                 border-radius: 6px;
-                border: 1px solid #f7768e;
-            }
+                border: 1px solid {T['danger']};
+            }}
         """)
         lbl_banner.setWordWrap(True)
         layout.addWidget(lbl_banner)
@@ -62,7 +62,7 @@ class OverwriteConfirmDialog(QDialog):
             "Dosya çakışması kuralınız <b>'Üzerine Yaz'</b> olarak ayarlanmış.<br>"
             "Bu indirme başlatılırsa mevcut dosyanın içeriği <b>kalıcı olarak silinecek veya değiştirilecektir</b>."
         )
-        lbl_info.setStyleSheet("color: #cfc9c2; font-size: 12px; line-height: 1.4;")
+        lbl_info.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px; line-height: 1.4;")
         lbl_info.setWordWrap(True)
         layout.addWidget(lbl_info)
 
@@ -94,17 +94,17 @@ class OverwriteConfirmDialog(QDialog):
 
         # Auto Rename Button (Recommended safe choice)
         self.btn_rename = QPushButton("🔄 Otomatik Yeniden Adlandır")
-        self.btn_rename.setStyleSheet("""
-            QPushButton {
-                background-color: #7aa2f7;
-                color: #1a1b26;
+        self.btn_rename.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['accent']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 padding: 7px 14px;
                 border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #89b4fa;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['color_blue']};
+            }}
         """)
         self.btn_rename.setToolTip("Mevcut dosyayı korur, yeni indirmeyi 'dosya (1).ext' olarak adlandırır.")
         self.btn_rename.clicked.connect(self._on_auto_rename)
@@ -114,19 +114,19 @@ class OverwriteConfirmDialog(QDialog):
 
         # Overwrite Button (Danger button)
         self.btn_overwrite = QPushButton("⚠️ Üzerine Yaz")
-        self.btn_overwrite.setStyleSheet("""
-            QPushButton {
-                background-color: #c53b53;
-                color: #ffffff;
+        self.btn_overwrite.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['danger']};
+                color: {T['text_on_accent']};
                 font-weight: bold;
                 padding: 7px 14px;
                 border-radius: 5px;
-                border: 1px solid #f7768e;
-            }
-            QPushButton:hover {
-                background-color: #f7768e;
-                color: #1a1b26;
-            }
+                border: 1px solid {T['danger']};
+            }}
+            QPushButton:hover {{
+                background-color: {T['danger']};
+                color: {T['bg_main']};
+            }}
         """)
         self.btn_overwrite.setToolTip("Mevcut dosyanın içeriğini kalıcı olarak silip yeni indirilen ile değiştirir.")
         self.btn_overwrite.clicked.connect(self._on_overwrite)

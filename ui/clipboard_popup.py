@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QApplication, QGraphicsDropShadowEffect
 )
 from PyQt6.QtGui import QColor, QFont, QCursor
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 class ClipboardNotificationPopup(QWidget):
     """
@@ -46,12 +47,12 @@ class ClipboardNotificationPopup(QWidget):
         self.container = QWidget(self)
         self.container.setGeometry(10, 10, 340, 110)
         self.container.setObjectName("container")
-        self.container.setStyleSheet("""
-            QWidget#container {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1f2335, stop:1 #1a1b26);
-                border: 1px solid #3d59a1;
+        self.container.setStyleSheet(f"""
+            QWidget#container {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {T['bg_panel']}, stop:1 {T['bg_main']});
+                border: 1px solid {T['accent_primary']};
                 border-radius: 12px;
-            }
+            }}
         """)
 
         # Drop shadow effect
@@ -70,27 +71,27 @@ class ClipboardNotificationPopup(QWidget):
         header.setSpacing(8)
 
         self.lbl_icon = QLabel("⚡")
-        self.lbl_icon.setStyleSheet("font-size: 16px; color: #7aa2f7;")
+        self.lbl_icon.setStyleSheet(f"font-size: 16px; color: {T['accent']};")
 
         self.lbl_title = QLabel("İndirme Bağlantısı Algılandı")
-        self.lbl_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #7aa2f7;")
+        self.lbl_title.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {T['accent']};")
 
         self.btn_close = QPushButton("✕")
         self.btn_close.setFixedSize(22, 22)
         self.btn_close.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.btn_close.setStyleSheet("""
-            QPushButton {
+        self.btn_close.setStyleSheet(f"""
+            QPushButton {{
                 background: transparent;
                 border: none;
-                color: #565f89;
+                color: {T['disabled_text']};
                 font-size: 13px;
                 font-weight: bold;
                 border-radius: 11px;
-            }
-            QPushButton:hover {
-                background-color: #f7768e;
-                color: #ffffff;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['danger']};
+                color: {T['text_on_accent']};
+            }}
         """)
         self.btn_close.clicked.connect(self.hide_animated)
 
@@ -101,7 +102,7 @@ class ClipboardNotificationPopup(QWidget):
 
         # Subtitle / Domain & File info
         self.lbl_info = QLabel("Link indirilsin mi?")
-        self.lbl_info.setStyleSheet("color: #c0caf5; font-size: 11px;")
+        self.lbl_info.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px;")
         self.lbl_info.setWordWrap(True)
         layout.addWidget(self.lbl_info)
 
@@ -111,58 +112,58 @@ class ClipboardNotificationPopup(QWidget):
 
         self.btn_quick_download = QPushButton("⚡ Hemen İndir")
         self.btn_quick_download.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.btn_quick_download.setStyleSheet("""
-            QPushButton {
-                background-color: #7aa2f7;
-                color: #1a1b26;
+        self.btn_quick_download.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['accent']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 font-size: 11px;
                 padding: 6px 10px;
                 border: none;
                 border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #89b4fa;
-            }
-            QPushButton:pressed {
-                background-color: #3d59a1;
-                color: #ffffff;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['color_blue']};
+            }}
+            QPushButton:pressed {{
+                background-color: {T['accent_primary']};
+                color: {T['text_on_accent']};
+            }}
         """)
         self.btn_quick_download.clicked.connect(self._on_quick_download)
 
         self.btn_open_dialog = QPushButton("Ayarlarla İndir...")
         self.btn_open_dialog.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.btn_open_dialog.setStyleSheet("""
-            QPushButton {
-                background-color: #24283b;
-                color: #c0caf5;
+        self.btn_open_dialog.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['bg_card']};
+                color: {T['text_primary']};
                 font-size: 11px;
                 padding: 6px 10px;
-                border: 1px solid #414868;
+                border: 1px solid {T['border']};
                 border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2f354f;
-                border-color: #7aa2f7;
-                color: #ffffff;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['bg_hover']};
+                border-color: {T['accent']};
+                color: {T['text_on_accent']};
+            }}
         """)
         self.btn_open_dialog.clicked.connect(self._on_open_dialog)
 
         self.btn_ignore = QPushButton("Yoksay")
         self.btn_ignore.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.btn_ignore.setStyleSheet("""
-            QPushButton {
+        self.btn_ignore.setStyleSheet(f"""
+            QPushButton {{
                 background-color: transparent;
-                color: #7a88cf;
+                color: {T['text_secondary']};
                 font-size: 11px;
                 padding: 6px 8px;
                 border: none;
-            }
-            QPushButton:hover {
-                color: #f7768e;
-            }
+            }}
+            QPushButton:hover {{
+                color: {T['danger']};
+            }}
         """)
         self.btn_ignore.clicked.connect(self.hide_animated)
 

@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QProgressBar, QMessageBox
 )
 from PyQt6.QtGui import QFont
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 
 class PowerCountdownDialog(QDialog):
@@ -53,7 +54,7 @@ class PowerCountdownDialog(QDialog):
 
         self.lbl_title = QLabel(f"{action_icon} Kuyruk Bitti: {action_title}")
         self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0caf5;")
+        self.lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {T['text_primary']};")
         layout.addWidget(self.lbl_title)
 
         self.lbl_info = QLabel(
@@ -61,7 +62,7 @@ class PowerCountdownDialog(QDialog):
             "İşlemin gerçekleşmesine kalan süre:"
         )
         self.lbl_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_info.setStyleSheet("color: #a9b1d6; font-size: 12px;")
+        self.lbl_info.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px;")
         layout.addWidget(self.lbl_info)
 
         self.lbl_warning = QLabel(
@@ -70,7 +71,7 @@ class PowerCountdownDialog(QDialog):
         )
         self.lbl_warning.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_warning.setStyleSheet(
-            "color: #f7768e; font-size: 12px; font-weight: bold;"
+            f"color: {T['danger']}; font-size: 12px; font-weight: bold;"
         )
         self.lbl_warning.setWordWrap(True)
         layout.addWidget(self.lbl_warning)
@@ -78,7 +79,7 @@ class PowerCountdownDialog(QDialog):
         self.lbl_countdown = QLabel(f"{self.remaining_seconds} saniye")
         self.lbl_countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_countdown.setStyleSheet(
-            "font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;"
+            f"font-size: 38px; font-weight: bold; color: {T['color_orange']}; margin: 4px;"
         )
         layout.addWidget(self.lbl_countdown)
 
@@ -87,16 +88,16 @@ class PowerCountdownDialog(QDialog):
         self.progress.setValue(self.total_seconds)
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(14)
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3b4261;
+        self.progress.setStyleSheet(f"""
+            QProgressBar {{
+                border: 1px solid {T['border']};
                 border-radius: 7px;
-                background-color: #1a1b26;
-            }
-            QProgressBar::chunk {
-                background-color: #f7768e;
+                background-color: {T['bg_main']};
+            }}
+            QProgressBar::chunk {{
+                background-color: {T['danger']};
                 border-radius: 7px;
-            }
+            }}
         """)
         layout.addWidget(self.progress)
 
@@ -104,33 +105,33 @@ class PowerCountdownDialog(QDialog):
         btn_layout.setSpacing(8)
 
         self.btn_cancel = QPushButton("İşlemi İptal Et")
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #414868;
-                color: #c0caf5;
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['border']};
+                color: {T['text_primary']};
                 font-weight: bold;
                 padding: 8px 14px;
                 border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #4f5675;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['border']};
+            }}
         """)
         self.btn_cancel.clicked.connect(self._on_cancel)
         btn_layout.addWidget(self.btn_cancel)
 
         self.btn_suspend = QPushButton("⏸️ Askıya Al")
-        self.btn_suspend.setStyleSheet("""
-            QPushButton {
-                background-color: #7aa2f7;
-                color: #1a1b26;
+        self.btn_suspend.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['accent']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 padding: 8px 14px;
                 border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #89b4fa;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['color_blue']};
+            }}
         """)
         self.btn_suspend.clicked.connect(self._toggle_suspend)
         btn_layout.addWidget(self.btn_suspend)
@@ -139,18 +140,18 @@ class PowerCountdownDialog(QDialog):
 
         self.btn_now = QPushButton("Şimdi Kapat" if self.action == "shutdown" else "Şimdi Uyut")
         self.btn_now.setObjectName("btn_now")
-        self.btn_now.setStyleSheet("""
-            QPushButton#btn_now {
-                background-color: #f7768e;
-                color: #ffffff;
+        self.btn_now.setStyleSheet(f"""
+            QPushButton#btn_now {{
+                background-color: {T['danger']};
+                color: {T['text_on_accent']};
                 font-weight: bold;
                 padding: 10px 18px;
                 border-radius: 6px;
                 font-size: 13px;
-            }
-            QPushButton#btn_now:hover {
-                background-color: #ff899d;
-            }
+            }}
+            QPushButton#btn_now:hover {{
+                background-color: {T['danger']};
+            }}
         """)
         self.btn_now.clicked.connect(self._on_now)
         btn_layout.addWidget(self.btn_now)
@@ -171,15 +172,15 @@ class PowerCountdownDialog(QDialog):
         elif seconds > self.FLASH_THRESHOLD and self._flashing:
             self._stop_flash()
             self.lbl_countdown.setStyleSheet(
-                "font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;"
+                f"font-size: 38px; font-weight: bold; color: {T['color_orange']}; margin: 4px;"
             )
 
     def _toggle_flash(self):
         current = self.lbl_countdown.styleSheet()
-        flash_color = "#ff5f56" if self.action == "shutdown" else "#bb9af7"
+        flash_color = T['danger'] if self.action == "shutdown" else T['color_purple']
         if flash_color in current:
             self.lbl_countdown.setStyleSheet(
-                "font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;"
+                f"font-size: 38px; font-weight: bold; color: {T['color_orange']}; margin: 4px;"
             )
         else:
             self.lbl_countdown.setStyleSheet(
@@ -195,42 +196,42 @@ class PowerCountdownDialog(QDialog):
         self.is_suspended = suspended
         if suspended:
             self.lbl_countdown.setText("⏸️ Askıya Alındı")
-            self.lbl_countdown.setStyleSheet("font-size: 26px; font-weight: bold; color: #7aa2f7; margin: 2px;")
+            self.lbl_countdown.setStyleSheet(f"font-size: 26px; font-weight: bold; color: {T['accent']}; margin: 2px;")
             self.lbl_info.setText(f"⚠️ {reason}.\nAçık işlerinizi korumak için geri sayım durduruldu.")
-            self.lbl_info.setStyleSheet("color: #7aa2f7; font-size: 12px; font-weight: bold;")
+            self.lbl_info.setStyleSheet(f"color: {T['accent']}; font-size: 12px; font-weight: bold;")
             self.btn_suspend.setText("▶️ Devam Ettir")
-            self.btn_suspend.setStyleSheet("""
-                QPushButton {
-                    background-color: #9ece6a;
-                    color: #1a1b26;
+            self.btn_suspend.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {T['success']};
+                    color: {T['bg_main']};
                     font-weight: bold;
                     padding: 8px 14px;
                     border-radius: 6px;
-                }
-                QPushButton:hover {
-                    background-color: #b9f27c;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {T['success']};
+                }}
             """)
         else:
             self.lbl_countdown.setText(f"{self.remaining_seconds} saniye")
-            self.lbl_countdown.setStyleSheet("font-size: 38px; font-weight: bold; color: #ff9e64; margin: 4px;")
+            self.lbl_countdown.setStyleSheet(f"font-size: 38px; font-weight: bold; color: {T['color_orange']}; margin: 4px;")
             self.lbl_info.setText(
                 "Kuyruktaki tüm indirmeler tamamlandı.\n"
                 "İşlemin gerçekleşmesine kalan süre:"
             )
-            self.lbl_info.setStyleSheet("color: #a9b1d6; font-size: 12px;")
+            self.lbl_info.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px;")
             self.btn_suspend.setText("⏸️ Askıya Al")
-            self.btn_suspend.setStyleSheet("""
-                QPushButton {
-                    background-color: #7aa2f7;
-                    color: #1a1b26;
+            self.btn_suspend.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {T['accent']};
+                    color: {T['bg_main']};
                     font-weight: bold;
                     padding: 8px 14px;
                     border-radius: 6px;
-                }
-                QPushButton:hover {
-                    background-color: #89b4fa;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {T['color_blue']};
+                }}
             """)
 
     def _toggle_suspend(self):

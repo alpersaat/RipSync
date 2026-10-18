@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from core.database import Database
 from ui.tray_icon import create_default_icon
+from ui.styles import T  # noqa: F401  (tema tokenlari)
 
 
 class OnboardingDialog(QDialog):
@@ -39,16 +40,16 @@ class OnboardingDialog(QDialog):
         for i in range(5):
             dot = QLabel(f"Adım {i + 1}")
             dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            dot.setStyleSheet("""
-                QLabel {
-                    background-color: #24283b;
-                    color: #7982a9;
+            dot.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {T['bg_card']};
+                    color: {T['text_secondary']};
                     font-size: 11px;
                     font-weight: bold;
                     border-radius: 10px;
                     padding: 4px 12px;
                     min-height: 18px;
-                }
+                }}
             """)
             self.step_dots.append(dot)
             self.step_indicator_layout.addWidget(dot)
@@ -69,7 +70,7 @@ class OnboardingDialog(QDialog):
 
         self.btn_skip = QPushButton("Turu Atla")
         self.btn_skip.setObjectName("btn_secondary")
-        self.btn_skip.setStyleSheet("color: #7982a9; background-color: transparent; border: none; font-size: 12px;")
+        self.btn_skip.setStyleSheet(f"color: {T['text_secondary']}; background-color: transparent; border: none; font-size: 12px;")
         self.btn_skip.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_skip.clicked.connect(self._on_skip)
         nav_layout.addWidget(self.btn_skip)
@@ -85,17 +86,17 @@ class OnboardingDialog(QDialog):
 
         self.btn_next = QPushButton("İleri ▶")
         self.btn_next.setFixedSize(110, 34)
-        self.btn_next.setStyleSheet("""
-            QPushButton {
-                background-color: #7aa2f7;
-                color: #1a1b26;
+        self.btn_next.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['accent']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 border-radius: 6px;
                 font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #89b4fa;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['color_blue']};
+            }}
         """)
         self.btn_next.clicked.connect(self._go_next)
         nav_layout.addWidget(self.btn_next)
@@ -114,7 +115,7 @@ class OnboardingDialog(QDialog):
         layout.setSpacing(14)
 
         lbl_hero = QLabel("🚀 RipSync'e Hoş Geldiniz!")
-        lbl_hero.setStyleSheet("font-size: 20px; font-weight: bold; color: #7aa2f7;")
+        lbl_hero.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {T['accent']};")
         layout.addWidget(lbl_hero)
 
         lbl_sub = QLabel(
@@ -122,7 +123,7 @@ class OnboardingDialog(QDialog):
             "Kullanım alışkanlığınıza en uygun çalışma modunu seçerek başlayabilirsiniz:"
         )
         lbl_sub.setWordWrap(True)
-        lbl_sub.setStyleSheet("color: #c0caf5; font-size: 13px; line-height: 1.4;")
+        lbl_sub.setStyleSheet(f"color: {T['text_primary']}; font-size: 13px; line-height: 1.4;")
         layout.addWidget(lbl_sub)
 
         # Mod Seçim Kartları
@@ -130,16 +131,16 @@ class OnboardingDialog(QDialog):
 
         # 1. Basit Mod Kartı
         card_simple = QFrame()
-        card_simple.setStyleSheet("""
-            QFrame {
-                background-color: #1f2335;
-                border: 2px solid #3b4261;
+        card_simple.setStyleSheet(f"""
+            QFrame {{
+                background-color: {T['bg_panel']};
+                border: 2px solid {T['border']};
                 border-radius: 10px;
                 padding: 12px;
-            }
-            QFrame:hover {
-                border-color: #9ece6a;
-            }
+            }}
+            QFrame:hover {{
+                border-color: {T['success']};
+            }}
         """)
         lay_s = QVBoxLayout(card_simple)
         lay_s.setSpacing(6)
@@ -147,7 +148,7 @@ class OnboardingDialog(QDialog):
         top_s = QHBoxLayout()
         self.rad_simple = QRadioButton("🟢 Basit Mod (Yeni Kullanıcılar ve Sade Tasarım Sevenler)")
         self.rad_simple.setChecked(True)
-        self.rad_simple.setStyleSheet("font-weight: bold; font-size: 14px; color: #9ece6a;")
+        self.rad_simple.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {T['success']};")
         self.mode_btn_group.addButton(self.rad_simple)
         top_s.addWidget(self.rad_simple)
         lay_s.addLayout(top_s)
@@ -157,29 +158,29 @@ class OnboardingDialog(QDialog):
             "• Karmaşık sekmeler ve kafa karıştırıcı ayarlar gizlenir.\n"
             "• Temiz dosya listesi ve en sade arama deneyimi sunar."
         )
-        lbl_s_desc.setStyleSheet("color: #a9b1d6; font-size: 12px; margin-left: 24px;")
+        lbl_s_desc.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px; margin-left: 24px;")
         lay_s.addWidget(lbl_s_desc)
         layout.addWidget(card_simple)
 
         # 2. Gelişmiş Mod Kartı
         card_adv = QFrame()
-        card_adv.setStyleSheet("""
-            QFrame {
-                background-color: #1f2335;
-                border: 2px solid #3b4261;
+        card_adv.setStyleSheet(f"""
+            QFrame {{
+                background-color: {T['bg_panel']};
+                border: 2px solid {T['border']};
                 border-radius: 10px;
                 padding: 12px;
-            }
-            QFrame:hover {
-                border-color: #bb9af7;
-            }
+            }}
+            QFrame:hover {{
+                border-color: {T['color_purple']};
+            }}
         """)
         lay_a = QVBoxLayout(card_adv)
         lay_a.setSpacing(6)
 
         top_a = QHBoxLayout()
         self.rad_adv = QRadioButton("⚡ Gelişmiş Mod (Deneyimli Kullanıcılar ve Tam Kontrol)")
-        self.rad_adv.setStyleSheet("font-weight: bold; font-size: 14px; color: #bb9af7;")
+        self.rad_adv.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {T['color_purple']};")
         self.mode_btn_group.addButton(self.rad_adv)
         top_a.addWidget(self.rad_adv)
         lay_a.addLayout(top_a)
@@ -189,12 +190,12 @@ class OnboardingDialog(QDialog):
             "• Özel kuyruk yönetimi, dosya etiketleri (Tags) ve site bazlı klasör kuralları.\n"
             "• Otomasyon, Webhook bildirimleri ve gelişmiş arama filtreleri."
         )
-        lbl_a_desc.setStyleSheet("color: #a9b1d6; font-size: 12px; margin-left: 24px;")
+        lbl_a_desc.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px; margin-left: 24px;")
         lay_a.addWidget(lbl_a_desc)
         layout.addWidget(card_adv)
 
         lbl_tip = QLabel("💡 Not: Bu tercihi ana ekrandaki 'Mod Değiştir' butonundan dilediğiniz an tek tıkla değiştirebilirsiniz.")
-        lbl_tip.setStyleSheet("color: #7aa2f7; font-size: 11px; margin-top: 4px;")
+        lbl_tip.setStyleSheet(f"color: {T['accent']}; font-size: 11px; margin-top: 4px;")
         layout.addWidget(lbl_tip)
 
         layout.addStretch()
@@ -210,18 +211,18 @@ class OnboardingDialog(QDialog):
         layout.setSpacing(16)
 
         lbl_title = QLabel("📁 İndirme Konumu ve Klasör Tercihleri")
-        lbl_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #7aa2f7;")
+        lbl_title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {T['accent']};")
         layout.addWidget(lbl_title)
 
         lbl_info = QLabel("İndirilen dosyalarınızın varsayılan olarak kaydedileceği klasörü belirleyin:")
-        lbl_info.setStyleSheet("color: #c0caf5; font-size: 13px;")
+        lbl_info.setStyleSheet(f"color: {T['text_primary']}; font-size: 13px;")
         layout.addWidget(lbl_info)
 
         # Klasör Seçim Kutusu
         box_dir = QHBoxLayout()
         default_dl = self.db.get_default_save_dir() if hasattr(self.db, "get_default_save_dir") else os.path.join(os.path.expanduser("~"), "Downloads")
         self.edit_dir = QLineEdit(default_dl)
-        self.edit_dir.setStyleSheet("padding: 8px; border-radius: 6px; background-color: #1f2335; border: 1px solid #3b4261; color: #c0caf5;")
+        self.edit_dir.setStyleSheet(f"padding: 8px; border-radius: 6px; background-color: {T['bg_panel']}; border: 1px solid {T['border']}; color: {T['text_primary']};")
         btn_browse = QPushButton("Gözat...")
         btn_browse.setObjectName("btn_secondary")
         btn_browse.setFixedHeight(34)
@@ -234,23 +235,23 @@ class OnboardingDialog(QDialog):
 
         # Hızlı Ayar Seçenekleri
         grp_opts = QFrame()
-        grp_opts.setStyleSheet("background-color: #1f2335; border-radius: 8px; padding: 12px;")
+        grp_opts.setStyleSheet(f"background-color: {T['bg_panel']}; border-radius: 8px; padding: 12px;")
         lay_opts = QVBoxLayout(grp_opts)
         lay_opts.setSpacing(12)
 
         self.chk_categorize = QCheckBox("🗂️ Akıllı Kategorizasyon (Videolar, Müzikler, Belgeler otomatik alt klasörlere ayrılsın)")
         self.chk_categorize.setChecked(True)
-        self.chk_categorize.setStyleSheet("font-size: 12px; color: #c0caf5;")
+        self.chk_categorize.setStyleSheet(f"font-size: 12px; color: {T['text_primary']};")
         lay_opts.addWidget(self.chk_categorize)
 
         self.chk_clipboard = QCheckBox("📋 Akıllı Pano İzleyici (Tarayıcıda kopyaladığınız indirme linklerini sağ altta yakala)")
         self.chk_clipboard.setChecked(True)
-        self.chk_clipboard.setStyleSheet("font-size: 12px; color: #c0caf5;")
+        self.chk_clipboard.setStyleSheet(f"font-size: 12px; color: {T['text_primary']};")
         lay_opts.addWidget(self.chk_clipboard)
 
         self.chk_sound = QCheckBox("🔔 İndirme tamamlandığında bildirim sesi çal")
         self.chk_sound.setChecked(True)
-        self.chk_sound.setStyleSheet("font-size: 12px; color: #c0caf5;")
+        self.chk_sound.setStyleSheet(f"font-size: 12px; color: {T['text_primary']};")
         lay_opts.addWidget(self.chk_sound)
 
         layout.addWidget(grp_opts)
@@ -267,7 +268,7 @@ class OnboardingDialog(QDialog):
         layout.setSpacing(14)
 
         lbl_title = QLabel("⚡ İndirme Başlatmanın 3 Kolay Yolu")
-        lbl_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #7aa2f7;")
+        lbl_title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {T['accent']};")
         layout.addWidget(lbl_title)
 
         methods = [
@@ -287,7 +288,7 @@ class OnboardingDialog(QDialog):
 
         for m_title, m_desc, m_icon in methods:
             item_box = QFrame()
-            item_box.setStyleSheet("background-color: #1f2335; border: 1px solid #3b4261; border-radius: 8px; padding: 10px;")
+            item_box.setStyleSheet(f"background-color: {T['bg_panel']}; border: 1px solid {T['border']}; border-radius: 8px; padding: 10px;")
             lay_item = QHBoxLayout(item_box)
             lay_item.setSpacing(12)
 
@@ -298,10 +299,10 @@ class OnboardingDialog(QDialog):
             lay_texts = QVBoxLayout()
             lay_texts.setSpacing(4)
             lbl_t = QLabel(m_title)
-            lbl_t.setStyleSheet("font-weight: bold; font-size: 13px; color: #7dcfff;")
+            lbl_t.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {T['color_cyan']};")
             lbl_d = QLabel(m_desc)
             lbl_d.setWordWrap(True)
-            lbl_d.setStyleSheet("color: #a9b1d6; font-size: 11px; line-height: 1.3;")
+            lbl_d.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px; line-height: 1.3;")
             lay_texts.addWidget(lbl_t)
             lay_texts.addWidget(lbl_d)
             lay_item.addLayout(lay_texts, stretch=1)
@@ -321,7 +322,7 @@ class OnboardingDialog(QDialog):
         layout.setSpacing(14)
 
         lbl_title = QLabel("💡 Kullanışlı İpuçları ve Kısayollar")
-        lbl_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #7aa2f7;")
+        lbl_title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {T['accent']};")
         layout.addWidget(lbl_title)
 
         tips = [
@@ -341,7 +342,7 @@ class OnboardingDialog(QDialog):
 
         for t_title, t_desc, t_icon in tips:
             item_box = QFrame()
-            item_box.setStyleSheet("background-color: #1f2335; border: 1px solid #3b4261; border-radius: 8px; padding: 8px 12px;")
+            item_box.setStyleSheet(f"background-color: {T['bg_panel']}; border: 1px solid {T['border']}; border-radius: 8px; padding: 8px 12px;")
             lay_item = QHBoxLayout(item_box)
             lay_item.setSpacing(12)
 
@@ -352,10 +353,10 @@ class OnboardingDialog(QDialog):
             lay_texts = QVBoxLayout()
             lay_texts.setSpacing(3)
             lbl_t = QLabel(t_title)
-            lbl_t.setStyleSheet("font-weight: bold; font-size: 12px; color: #9ece6a;")
+            lbl_t.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {T['success']};")
             lbl_d = QLabel(t_desc)
             lbl_d.setWordWrap(True)
-            lbl_d.setStyleSheet("color: #c0caf5; font-size: 11px;")
+            lbl_d.setStyleSheet(f"color: {T['text_primary']}; font-size: 11px;")
             lay_texts.addWidget(lbl_t)
             lay_texts.addWidget(lbl_d)
             lay_item.addLayout(lay_texts, stretch=1)
@@ -381,7 +382,7 @@ class OnboardingDialog(QDialog):
         layout.addWidget(lbl_check)
 
         lbl_fin = QLabel("Her Şey Hazır!")
-        lbl_fin.setStyleSheet("font-size: 22px; font-weight: bold; color: #9ece6a;")
+        lbl_fin.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {T['success']};")
         lbl_fin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_fin)
 
@@ -390,44 +391,44 @@ class OnboardingDialog(QDialog):
             "RipSync artık maksimum indirme hızı ve kolay arayüzüyle kullanıma hazır."
         )
         lbl_ready_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_ready_desc.setStyleSheet("color: #c0caf5; font-size: 13px; line-height: 1.5;")
+        lbl_ready_desc.setStyleSheet(f"color: {T['text_primary']}; font-size: 13px; line-height: 1.5;")
         layout.addWidget(lbl_ready_desc)
 
         # Özet Kutusu
         box_summary = QFrame()
         box_summary.setFixedWidth(460)
-        box_summary.setStyleSheet("background-color: #1f2335; border: 1px solid #7aa2f7; border-radius: 8px; padding: 14px;")
+        box_summary.setStyleSheet(f"background-color: {T['bg_panel']}; border: 1px solid {T['accent']}; border-radius: 8px; padding: 14px;")
         lay_sum = QVBoxLayout(box_summary)
         lay_sum.setSpacing(8)
 
         self.lbl_sum_mode = QLabel("Seçilen Arayüz: Basit Mod")
-        self.lbl_sum_mode.setStyleSheet("color: #7dcfff; font-weight: bold; font-size: 12px;")
+        self.lbl_sum_mode.setStyleSheet(f"color: {T['color_cyan']}; font-weight: bold; font-size: 12px;")
         lay_sum.addWidget(self.lbl_sum_mode)
 
         self.lbl_sum_dir = QLabel("Kayıt Klasörü: -")
-        self.lbl_sum_dir.setStyleSheet("color: #a9b1d6; font-size: 11px;")
+        self.lbl_sum_dir.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px;")
         self.lbl_sum_dir.setWordWrap(True)
         lay_sum.addWidget(self.lbl_sum_dir)
 
         lbl_sum_help = QLabel("İpucu: Bu rehberi daha sonra 'Yardım -> Rehberli Tur' menüsünden tekrar başlatabilirsiniz.")
-        lbl_sum_help.setStyleSheet("color: #7982a9; font-size: 11px; margin-top: 4px;")
+        lbl_sum_help.setStyleSheet(f"color: {T['text_secondary']}; font-size: 11px; margin-top: 4px;")
         lay_sum.addWidget(lbl_sum_help)
 
         layout.addWidget(box_summary)
 
         btn_finish = QPushButton("🚀 RipSync'i Başlat")
         btn_finish.setFixedSize(200, 42)
-        btn_finish.setStyleSheet("""
-            QPushButton {
-                background-color: #9ece6a;
-                color: #1a1b26;
+        btn_finish.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {T['success']};
+                color: {T['bg_main']};
                 font-weight: bold;
                 font-size: 14px;
                 border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: #b9f27c;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {T['success']};
+            }}
         """)
         btn_finish.clicked.connect(self._on_finish)
         layout.addWidget(btn_finish, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -446,40 +447,40 @@ class OnboardingDialog(QDialog):
     def _update_step_indicator(self, index: int):
         for i, dot in enumerate(self.step_dots):
             if i == index:
-                dot.setStyleSheet("""
-                    QLabel {
-                        background-color: #7aa2f7;
-                        color: #1a1b26;
+                dot.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {T['accent']};
+                        color: {T['bg_main']};
                         font-size: 11px;
                         font-weight: bold;
                         border-radius: 10px;
                         padding: 4px 12px;
                         min-height: 18px;
-                    }
+                    }}
                 """)
             elif i < index:
-                dot.setStyleSheet("""
-                    QLabel {
-                        background-color: #9ece6a;
-                        color: #1a1b26;
+                dot.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {T['success']};
+                        color: {T['bg_main']};
                         font-size: 11px;
                         font-weight: bold;
                         border-radius: 10px;
                         padding: 4px 12px;
                         min-height: 18px;
-                    }
+                    }}
                 """)
             else:
-                dot.setStyleSheet("""
-                    QLabel {
-                        background-color: #24283b;
-                        color: #7982a9;
+                dot.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {T['bg_card']};
+                        color: {T['text_secondary']};
                         font-size: 11px;
                         font-weight: bold;
                         border-radius: 10px;
                         padding: 4px 12px;
                         min-height: 18px;
-                    }
+                    }}
                 """)
 
     def _go_prev(self):
