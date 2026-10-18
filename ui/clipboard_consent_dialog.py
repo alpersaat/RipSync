@@ -36,7 +36,7 @@ class ClipboardConsentDialog(QDialog):
         lbl_icon.setStyleSheet("font-size: 32px;")
         
         lbl_title = QLabel("Pano İzleme Özelliği")
-        lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {T['bg_main']};")
+        lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {T['text_primary']};")
         
         header_layout.addWidget(lbl_icon)
         header_layout.addWidget(lbl_title)
@@ -62,7 +62,7 @@ class ClipboardConsentDialog(QDialog):
             "bağlantılarını otomatik olarak algılayıp hızlı indirme penceresi sunabilir."
         )
         lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet(f"color: {T['border']}; font-size: 12px; line-height: 1.4;")
+        lbl_desc.setStyleSheet(f"color: {T['text_muted']}; font-size: 12px;")
         card_layout.addWidget(lbl_desc)
 
         lbl_privacy = QLabel(
@@ -72,14 +72,14 @@ class ClipboardConsentDialog(QDialog):
             "• Bu ayarı istediğiniz an Ayarlar penceresinden değiştirebilirsiniz."
         )
         lbl_privacy.setWordWrap(True)
-        lbl_privacy.setStyleSheet(f"color: {T['bg_card']}; font-size: 11px; background-color: {T['bg_panel']}; border-radius: 6px; padding: 8px;")
+        lbl_privacy.setStyleSheet(f"color: {T['text_muted']}; font-size: 11px; background-color: {T['bg_panel']}; border-radius: 6px; padding: 8px;")
         card_layout.addWidget(lbl_privacy)
 
         layout.addWidget(card)
 
         # Prompt question
         lbl_question = QLabel("Pano izlemeyi etkinleştirmek istiyor musunuz?")
-        lbl_question.setStyleSheet(f"font-weight: 600; color: {T['bg_card']}; font-size: 13px;")
+        lbl_question.setStyleSheet(f"font-weight: 600; color: {T['text_primary']}; font-size: 13px;")
         layout.addWidget(lbl_question)
 
         layout.addStretch()
@@ -93,14 +93,14 @@ class ClipboardConsentDialog(QDialog):
         self.btn_disable.setStyleSheet(f"""
             QPushButton {{
                 background-color: {T['bg_panel']};
-                color: {T['border']};
+                color: {T['text_primary']};
                 border: 1px solid {T['border']};
                 border-radius: 6px;
                 padding: 8px 16px;
                 font-weight: 500;
             }}
             QPushButton:hover {{
-                background-color: {T['border_panel']};
+                background-color: {T['bg_hover']};
             }}
         """)
         self.btn_disable.clicked.connect(self.reject)

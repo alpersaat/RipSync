@@ -17,6 +17,36 @@ logger = get_logger("downloader")
 
 MIN_SPLIT_SIZE = 1024 * 1024  # 1 MB minimum remaining to split a segment
 
+RESERVED_OPTION_KEYS = {
+    "download_subtitles",
+    "download_thumbnail",
+    "embed_metadata",
+    "quality",
+    "browser_cookies",
+    "auto_open",
+    "auto_extract",
+}
+
+def clean_http_headers(headers: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Filters out internal RipSync options and non-string/bytes types to produce safe HTTP headers."""
+    if not headers or not isinstance(headers, dict):
+        return {}
+    cleaned: Dict[str, str] = {}
+    for k, v in headers.items():
+        if not isinstance(k, str):
+            continue
+        k_clean = k.strip()
+        if not k_clean or k_clean.lower() in RESERVED_OPTION_KEYS:
+            continue
+        # In Python, bool is a subclass of int (isinstance(True, int) == True)
+        if isinstance(v, bool) or v is None:
+            continue
+        if isinstance(v, (str, bytes)):
+            cleaned[k_clean] = v
+        elif isinstance(v, (int, float)):
+            cleaned[k_clean] = str(v)
+    return cleaned
+
 class MultiThreadDownloader:
     def __init__(self,
                  download_id: str,
@@ -39,7 +69,7 @@ class MultiThreadDownloader:
         self.filename = filename or ""
         self.save_path = ""
         self.connections = max(1, min(32, connections))
-        self.headers = headers or {}
+        self.headers = clean_http_headers(headers)
         self.speed_limiter = SpeedLimiter(speed_limit_bps)
         self.proxy = proxy
 
@@ -80,7 +110,7 @@ class MultiThreadDownloader:
     def probe_url(self) -> bool:
         """Inspect headers to determine filename, size, and range support."""
         self._set_status("Probing")
-        req_headers = dict(self.headers)
+        req_headers = clean_http_headers(self.headers)
         if "User-Agent" not in req_headers and "user-agent" not in req_headers:
             req_headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
@@ -350,7 +380,7 @@ class MultiThreadDownloader:
         with self.lock:
             self.url = new_url
             if new_headers is not None:
-                self.headers = new_headers
+                self.headers = clean_http_headers(new_headers)
             if self.status == "Error":
                 self.status = "Paused"
                 self.error_message = ""

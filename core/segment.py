@@ -9,6 +9,34 @@ from core.paths import to_long_path
 CHUNK_SIZE = 64 * 1024  # 64 KB
 FLUSH_EVERY = 1 * 1024 * 1024  # 1 MB
 
+RESERVED_OPTION_KEYS = {
+    "download_subtitles",
+    "download_thumbnail",
+    "embed_metadata",
+    "quality",
+    "browser_cookies",
+    "auto_open",
+    "auto_extract",
+}
+
+def _clean_headers(headers: Optional[dict]) -> dict:
+    if not headers or not isinstance(headers, dict):
+        return {}
+    cleaned = {}
+    for k, v in headers.items():
+        if not isinstance(k, str):
+            continue
+        k_clean = k.strip()
+        if not k_clean or k_clean.lower() in RESERVED_OPTION_KEYS:
+            continue
+        if isinstance(v, bool) or v is None:
+            continue
+        if isinstance(v, (str, bytes)):
+            cleaned[k_clean] = v
+        elif isinstance(v, (int, float)):
+            cleaned[k_clean] = str(v)
+    return cleaned
+
 class Segment(threading.Thread):
     def __init__(self,
                  index: int,
@@ -30,7 +58,7 @@ class Segment(threading.Thread):
         self.start_byte = start_byte
         self.end_byte = end_byte
         self.current_byte = current_byte if current_byte is not None else start_byte
-        self.headers = headers or {}
+        self.headers = _clean_headers(headers)
         self.speed_limiter = speed_limiter
         self.proxy = proxy
         self.on_progress = on_progress

@@ -79,4 +79,4 @@ def apply_theme_icons() -> dict:
 
 
 # Geçerli ikon boyutu
-ICON_SIZE = QSize(20, 20)
+ICON_SIZE = QSize(16, 16)

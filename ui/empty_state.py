@@ -22,11 +22,12 @@ class EmptyStateWidget(QFrame):
         self.setObjectName("empty_state_panel")
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 8, 12, 8)
 
         lbl_emoji = QLabel("⬇️")
         lbl_emoji.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_emoji.setStyleSheet(f"font-size: 44px; color: {T['accent']};")
+        lbl_emoji.setStyleSheet(f"font-size: 48px; color: {T['accent']};")
         layout.addWidget(lbl_emoji)
 
         lbl_title = QLabel("Henüz indirme yok")
@@ -50,7 +51,9 @@ class EmptyStateWidget(QFrame):
         btn_add = QPushButton("➕ URL Ekle")
         btn_add.setStyleSheet(
             f"QPushButton {{ background-color: {T['accent_primary']}; color: {T['text_on_accent']};"
-            f" border: none; border-radius: 6px; padding: 8px 18px; font-weight: bold; }}"
+            f" border: none; border-radius: 6px; padding: 8px 20px; font-weight: bold; font-size: 13px; }}"
+            f"QPushButton:hover {{ background-color: {T['accent_hover']}; }}"
+            f"QPushButton:pressed {{ background-color: {T['accent_active']}; }}"
         )
         btn_add.clicked.connect(self.add_clicked.emit)
         btn_row.addWidget(btn_add)
@@ -61,4 +64,3 @@ class EmptyStateWidget(QFrame):
         btn_row.addWidget(btn_batch)
 
         layout.addLayout(btn_row)
-        layout.addStretch()

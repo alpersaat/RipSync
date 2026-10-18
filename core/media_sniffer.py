@@ -27,6 +27,7 @@ class MediaSniffer:
                     'ext': 'mp4',
                     'duration': resolved.get('duration', 0),
                     'thumbnail': resolved.get('thumbnail', ''),
+                    'subtitles': False,
                     'formats': [{
                         'format_id': 'watermark_free_hd',
                         'resolution': 'HD (Filigransız)',
@@ -48,6 +49,7 @@ class MediaSniffer:
                     'ext': 'mp4',
                     'duration': resolved.get('duration', 0),
                     'thumbnail': resolved.get('thumbnail', ''),
+                    'subtitles': False,
                     'formats': [{
                         'format_id': 'watermark_free_hd',
                         'resolution': 'HD (Filigransız)',
@@ -79,6 +81,7 @@ class MediaSniffer:
                 ext = info.get('ext', 'mp4')
                 duration = info.get('duration', 0)
                 thumbnail = info.get('thumbnail', '')
+                has_subs = bool(info.get('subtitles') or info.get('automatic_captions'))
 
                 # Parse available formats
                 formats = []
@@ -100,6 +103,7 @@ class MediaSniffer:
                             'filesize': filesize,
                             'url': fmt.get('url', ''),
                             'note': note,
+                            'height': fmt.get('height') or 0,
                             'has_video': vcodec != 'none',
                             'has_audio': acodec != 'none'
                         })
@@ -109,6 +113,7 @@ class MediaSniffer:
                     'ext': ext,
                     'duration': duration,
                     'thumbnail': thumbnail,
+                    'subtitles': has_subs,
                     'formats': formats,
                     'url': url
                 }

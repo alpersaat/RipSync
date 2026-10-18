@@ -269,6 +269,7 @@ QMainWindow, QDialog {{
 QWidget {{
     color: {text_primary};
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 13px;
 }}
 
 /* ToolBar */
@@ -279,12 +280,18 @@ QToolBar {{
     padding: 6px;
 }}
 
+QToolBar::separator {{
+    background-color: {border_panel};
+    width: 1px;
+    margin: 7px 5px;
+}}
+
 QToolButton {{
     background-color: transparent;
     color: {text_primary};
     border: 1px solid transparent;
     border-radius: 6px;
-    padding: 6px 12px;
+    padding: 4px 8px;
     font-weight: 500;
 }}
 
@@ -361,6 +368,7 @@ QPushButton {{
     border: none;
     border-radius: 6px;
     padding: 8px 16px;
+    min-height: 26px;
     font-weight: bold;
 }}
 
@@ -393,6 +401,7 @@ QLineEdit, QSpinBox, QComboBox {{
     border: 1px solid {border};
     border-radius: 6px;
     padding: 7px 10px;
+    min-height: 26px;
     color: {text_primary};
     selection-background-color: {ac_primary};
 }}
@@ -501,6 +510,37 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0px;
 }}
 
+/* Menu Bar */
+QMenuBar {{
+    background-color: {bg_panel};
+    color: {text_muted};
+    border-bottom: 1px solid {border_panel};
+    padding: 3px 8px;
+    font-size: 13px;
+}}
+
+QMenuBar::item {{
+    background: transparent;
+    color: {text_muted};
+    padding: 6px 14px;
+    margin: 0 1px;
+    border-radius: 6px;
+}}
+
+QMenuBar::item:selected {{
+    background-color: {bg_hover};
+    color: {text_primary};
+}}
+
+QMenuBar::item:pressed {{
+    background-color: {ac_primary};
+    color: {t["text_on_accent"]};
+}}
+
+QMenuBar::item:disabled {{
+    color: {disabled_text};
+}}
+
 QMenu {{
     background-color: {menu_bg};
     border: 1px solid {menu_border};
@@ -517,6 +557,16 @@ QMenu::item {{
 QMenu::item:selected {{
     background-color: {ac_primary};
     color: {t["text_on_accent"]};
+}}
+
+QMenu::item:disabled {{
+    color: {disabled_text};
+}}
+
+QMenu::separator {{
+    height: 1px;
+    background-color: {menu_border};
+    margin: 5px 10px;
 }}
 """
 

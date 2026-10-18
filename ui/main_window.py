@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QFileDialog, QInputDialog, QToolButton, QSizePolicy, QDialog,
     QStackedWidget, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QMimeData, QSettings, QPoint, QRect, QSize
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut, QDrag, QDragEnterEvent, QDropEvent
 
 from datetime import datetime
@@ -407,7 +407,97 @@ class MainWindow(QMainWindow):
         # Check First-Run / Onboarding Tour & Apply UI Mode
         self.ui_mode = self.db.get_ui_mode()
         self.apply_ui_mode(self.ui_mode)
+
+        # Akıllı pencere boyutu & konumu (QSettings ile kalıcı)
+        self._init_window_geometry()
+
         QTimer.singleShot(400, self._check_first_run_onboarding)
+
+    # ---- PencereBoyutu/Konumu (QSettings) ------------------------------------
+    def _init_window_geometry(self):
+        """Ekran geometrisine göre akıllı varsayılan boyut uygular; önceki oturumdan
+        kayıtlı boyut/konum varsa onu geri yükler, yoksa pencereyi merkezler."""
+        self.setMinimumSize(980, 600)
+
+        self._geom_timer = QTimer(self)
+        self._geom_timer.setSingleShot(True)
+        self._geom_timer.setInterval(500)
+        self._geom_timer.timeout.connect(self._save_geometry)
+
+        screen = self.screen() or QApplication.primaryScreen()
+        avail = screen.availableGeometry()
+        default_w = min(1280, int(avail.width() * 0.75))
+        default_h = min(800, int(avail.height() * 0.8))
+
+        settings = QSettings()
+        try:
+            w = int(settings.value("geometry/width", default_w))
+            h = int(settings.value("geometry/height", default_h))
+        except (TypeError, ValueError):
+            w, h = default_w, default_h
+        w = max(980, min(w, avail.width()))
+        h = max(600, min(h, avail.height()))
+        self.resize(w, h)
+
+        valid_pos = False
+        x = settings.value("geometry/x")
+        y = settings.value("geometry/y")
+        if x is not None and y is not None:
+            try:
+                pos = QPoint(int(x), int(y))
+            except (TypeError, ValueError):
+                pos = None
+            if pos is not None:
+                union = QRect()
+                for scr in QApplication.screens():
+                    union = union.united(scr.availableGeometry())
+                if QRect(pos, QSize(w, h)).intersects(union):
+                    self.move(pos)
+                    valid_pos = True
+        if not valid_pos:
+            fg = self.frameGeometry()
+            fg.moveCenter(avail.center())
+            self.move(fg.topLeft())
+
+    def _save_geometry(self):
+        """Boyut ve konumu QSettings'e yazar. Küçültülmüş ya da gizli
+        pencerede geçersiz değer yazılmasını engeller."""
+        if not self.isVisible() or self.isMinimized():
+            return
+        geometry = self.geometry()
+        QSettings().setValue("geometry/width", geometry.width())
+        QSettings().setValue("geometry/height", geometry.height())
+        QSettings().setValue("geometry/x", geometry.x())
+        QSettings().setValue("geometry/y", geometry.y())
+
+    def _update_toolbar_break(self):
+        """Pencere genişliğine göre ikincil şeridi ilk satırda tutar veya
+        ikinci satıra alır (kırılım: toolbar_break_width ≈ 1100px)."""
+        toolbar2 = getattr(self, "toolbar2", None)
+        if toolbar2 is None:
+            return
+        broken = self.width() < self.toolbar_break_width
+        if broken == self._toolbar_broken:
+            return
+        spacer = getattr(self, "tb_spacer", None)
+        if spacer is not None:
+            spacer.setVisible(not broken)
+        if broken:
+            self.insertToolBarBreak(toolbar2)
+        else:
+            self.removeToolBarBreak(toolbar2)
+        self._toolbar_broken = broken
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_geom_timer"):
+            self._geom_timer.start()
+        self._update_toolbar_break()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if hasattr(self, "_geom_timer"):
+            self._geom_timer.start()
 
     def _init_menubar(self):
         menubar = self.menuBar()
@@ -660,18 +750,35 @@ class MainWindow(QMainWindow):
         self.btn_extension.setMenu(ext_menu)
         self.btn_extension.clicked.connect(self._show_extension_guide)
 
-        toolbar.addSeparator()
+        # Araç çubuğuna eklenmeyen bir QToolButton ana pencerenin (0,0) noktasında
+        # kalıp menü çubuğunun ilk maddesinin üzerine çiziliyordu; bu yüzden
+        # düğme, ait olduğu araç çubuğuna açıkça eklenir.
+        self.act_extension_widget = toolbar.addWidget(self.btn_extension)
 
-        # Toolbar Spacer and Mode Switcher (Basit / Gelişmiş Mod Geçişi)
+        # ---- 2. Grup: Basit / Gelişmiş mod geçişi -----------------------
+        # İkinci grup, geniş pencerede aynı satırda sağ kenara yaslanır;
+        # pencere 1100px'in altına düşünce şerit otomatik olarak ikinci
+        # satıra geçer (bkz. _update_toolbar_break).
+        self.toolbar_break_width = 1100
+        self._toolbar_broken = None
+
+        toolbar2 = QToolBar("İkincil Şerit")
+        toolbar2.setMovable(False)
+        self.toolbar2 = toolbar2
+
         tb_spacer = QWidget()
         tb_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(tb_spacer)
+        self.tb_spacer = tb_spacer
+        toolbar2.addWidget(tb_spacer)
 
         self.btn_mode_toggle = QPushButton("🟢 Basit Mod (Geç: Gelişmiş ❯)")
         self.btn_mode_toggle.setObjectName("btn_mode_toggle")
         self.btn_mode_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_mode_toggle.clicked.connect(self._toggle_ui_mode)
-        toolbar.addWidget(self.btn_mode_toggle)
+        toolbar2.addWidget(self.btn_mode_toggle)
+
+        self.addToolBar(toolbar2)
+        self._update_toolbar_break()
 
         # ---- İkincil şerit: sürekli ayarlar araç çubuğundan çıkarılıp
         # ince bir şeride taşındı (yalnızca Gelişmiş modda görünür).
@@ -691,7 +798,6 @@ class MainWindow(QMainWindow):
         self.spin_tb_concurrent.setRange(1, 10)
         self.spin_tb_concurrent.setValue(self.queue_mgr.max_concurrent)
         self.spin_tb_concurrent.setSuffix(" Dosya")
-        self.spin_tb_concurrent.setFixedWidth(85)
         self.spin_tb_concurrent.setToolTip("Aynı anda inecek dosya sayısı (biri bitince sıradaki başlar)")
         self.spin_tb_concurrent.valueChanged.connect(self._on_toolbar_concurrent_changed)
         tb_conc_layout.addWidget(self.spin_tb_concurrent)
@@ -729,21 +835,32 @@ class MainWindow(QMainWindow):
         tb_limiter_layout.setContentsMargins(6, 0, 6, 0)
         tb_limiter_layout.setSpacing(8)
 
-        self.chk_tb_speed_limit = QCheckBox("⚡ Hız Limiti:")
-        self.chk_tb_speed_limit.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
+        # Metin kırpılmasın: "⚡ Hız Limiti:" etiketi düz QLabel, onay kutusu sadece kare.
+        lbl_limiter = QLabel("⚡ Hız Limiti:")
+        lbl_limiter.setStyleSheet(f"font-weight: bold; color: {T['accent']};")
+        lbl_limiter.setToolTip("Hız Sınırlayıcıyı tek tıkla Aç / Kapat (Tam Hız)")
+        tb_limiter_layout.addWidget(lbl_limiter)
+
+        self.chk_tb_speed_limit = QCheckBox()
         self.chk_tb_speed_limit.setToolTip("Hız Sınırlayıcıyı tek tıkla Aç / Kapat (Tam Hız)")
         self.chk_tb_speed_limit.toggled.connect(self._on_toolbar_limit_toggled)
         tb_limiter_layout.addWidget(self.chk_tb_speed_limit)
+
+        # Slider + hazır limit + durum etiketi tek grupta hizalanır.
+        limit_group = QWidget()
+        limit_group_layout = QHBoxLayout(limit_group)
+        limit_group_layout.setContentsMargins(0, 0, 0, 0)
+        limit_group_layout.setSpacing(6)
 
         self.slider_tb_limit = QSlider(Qt.Orientation.Horizontal)
         self.slider_tb_limit.setRange(256, 50 * 1024)  # 256 KB/s - 50 MB/s
         self.slider_tb_limit.setSingleStep(256)
         self.slider_tb_limit.setPageStep(1024)
-        self.slider_tb_limit.setFixedWidth(130)
+        self.slider_tb_limit.setFixedWidth(112)
         self.slider_tb_limit.setToolTip("İndirme hız limitini kaydırarak ayarlayın")
         self.slider_tb_limit.setEnabled(False)
         self.slider_tb_limit.valueChanged.connect(self._on_toolbar_slider_changed)
-        tb_limiter_layout.addWidget(self.slider_tb_limit)
+        limit_group_layout.addWidget(self.slider_tb_limit)
 
         self.combo_tb_limit = QComboBox()
         self.combo_tb_limit.addItem("512 KB/s", 512)
@@ -757,11 +874,14 @@ class MainWindow(QMainWindow):
         self.combo_tb_limit.setToolTip("Hazır hız limiti seçin")
         self.combo_tb_limit.setEnabled(False)
         self.combo_tb_limit.currentIndexChanged.connect(self._on_toolbar_combo_changed)
-        tb_limiter_layout.addWidget(self.combo_tb_limit)
+        limit_group_layout.addWidget(self.combo_tb_limit)
 
         self.lbl_tb_limit_val = QLabel("Tam Hız")
-        self.lbl_tb_limit_val.setStyleSheet(f"font-weight: bold; color: {T['success']}; min-width: 75px;")
-        tb_limiter_layout.addWidget(self.lbl_tb_limit_val)
+        self.lbl_tb_limit_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._apply_limit_badge_style(success=True)
+        limit_group_layout.addWidget(self.lbl_tb_limit_val)
+
+        tb_limiter_layout.addWidget(limit_group)
 
         # Queue Completion Power Action Widget
         self.tb_queue_widget = QWidget()
@@ -797,7 +917,7 @@ class MainWindow(QMainWindow):
         quick_bar_spacer = QWidget()
         quick_bar_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         quick_layout.addWidget(quick_bar_spacer)
-        self.quick_bar.setProperty("objectName", "quick_settings_bar")
+        self.quick_bar.setObjectName("quick_settings_bar")
         self._apply_toolbar_icons()
 
 
@@ -805,19 +925,22 @@ class MainWindow(QMainWindow):
         # Central Widget
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        # Dikey: üstte ikincil ayar şeridi, altında kategori ağacı + indirme listesi.
+        main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(6)
 
         main_layout.addWidget(self.quick_bar)  # İkincil ayar şeridi (Gelişmiş mod)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(splitter, 1)
 
         # Left: Categories Tree
         self.tree_categories = CategoriesTreeWidget(parent_window=self)
         self.tree_categories.root_queues_item = None
         self.tree_categories.setHeaderHidden(True)
-        self.tree_categories.setFixedWidth(200)
+        # Sabit genişlik yazıları kesiyordu (örn. "Devam Edenler"); minimum pay + splitter esnekliği.
+        self.tree_categories.setMinimumWidth(240)
 
         root_all = QTreeWidgetItem(["📥 Tüm İndirmeler"])
         root_all.setData(0, Qt.ItemDataRole.UserRole, "All")
@@ -886,26 +1009,37 @@ class MainWindow(QMainWindow):
         self.edit_search.textChanged.connect(self._apply_search_and_filter)
         sf_layout.addWidget(self.edit_search, stretch=1)
 
-        # Quick Status Filter Chips
-        self.filter_btn_group = {}
-        for chip_id, chip_label in [
+        # Quick Status Filter — 5 çip yerine tek açılır QToolButton (çubuğu rahatlatır)
+        self._filter_chip_defs = [
             ("all", "Tümü"),
             ("Downloading", "⏳ İnenler"),
             ("Completed", "✔ Tamamlanan"),
             ("Paused", "⏸ Duraklatılan"),
             ("Error", "❌ Hatalı"),
-        ]:
-            btn = QPushButton(chip_label)
-            btn.setCheckable(True)
-            btn.setChecked(chip_id == "all")
-            btn.setStyleSheet(
-                f"QPushButton {{ background-color: {T['bg_card']}; border: 1px solid {T['border']}; border-radius: 5px; padding: 4px 8px; color: {T['text_muted']}; font-size: 11px; font-weight: bold; min-height: 20px; }}"
-                f"QPushButton:checked {{ background-color: {T['accent']}; color: {T['bg_main']}; border-color: {T['accent']}; }}"
-                f"QPushButton:hover:!checked {{ background-color: {T['bg_hover']}; color: {T['text_primary']}; }}"
-            )
-            btn.clicked.connect(lambda checked, c=chip_id: self._on_filter_chip_clicked(c))
-            self.filter_btn_group[chip_id] = btn
-            sf_layout.addWidget(btn)
+        ]
+        self.filter_btn_group = {}  # chip_id -> QAction (menü öğesi)
+        self.btn_filter_menu = QToolButton()
+        self.btn_filter_menu.setText("🔽 Tümü ▾")
+        self.btn_filter_menu.setToolTip("Duruma göre filtrele")
+        self.btn_filter_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_filter_menu.setStyleSheet(
+            f"QToolButton {{ background-color: {T['bg_card']}; border: 1px solid {T['border']};"
+            f" border-radius: 5px; padding: 4px 10px; color: {T['text_muted']}; font-size: 11px;"
+            f" font-weight: bold; min-height: 20px; }}"
+            f"QToolButton:hover {{ background-color: {T['bg_hover']}; color: {T['text_primary']};"
+            f" border-color: {T['accent']}; }}"
+            f"QToolButton::menu-indicator {{ image: none; width: 0px; }}"
+        )
+        self.menu_filter = QMenu(self)
+        for chip_id, chip_label in self._filter_chip_defs:
+            act = QAction(chip_label, self)
+            act.setCheckable(True)
+            act.setChecked(chip_id == "all")
+            act.triggered.connect(lambda checked=False, c=chip_id: self._on_filter_chip_clicked(c))
+            self.menu_filter.addAction(act)
+            self.filter_btn_group[chip_id] = act
+        self.btn_filter_menu.setMenu(self.menu_filter)
+        sf_layout.addWidget(self.btn_filter_menu)
 
         # Multi-criteria Filter Combos
         self.combo_size_filter = QComboBox()
@@ -914,7 +1048,6 @@ class MainWindow(QMainWindow):
         self.combo_size_filter.addItem("50 - 500 MB", "medium")
         self.combo_size_filter.addItem("500 MB - 2 GB", "large")
         self.combo_size_filter.addItem("> 2 GB", "huge")
-        self.combo_size_filter.setFixedWidth(115)
         self.combo_size_filter.currentIndexChanged.connect(self._apply_search_and_filter)
         sf_layout.addWidget(self.combo_size_filter)
 
@@ -924,12 +1057,13 @@ class MainWindow(QMainWindow):
         self.combo_date_filter.addItem("Dün", "yesterday")
         self.combo_date_filter.addItem("Son 7 Gün", "week")
         self.combo_date_filter.addItem("Daha Eski", "older")
-        self.combo_date_filter.setFixedWidth(115)
         self.combo_date_filter.currentIndexChanged.connect(self._apply_search_and_filter)
         sf_layout.addWidget(self.combo_date_filter)
 
         self.lbl_filter_count = QLabel("0 / 0")
         self.lbl_filter_count.setStyleSheet(f"color: {T['accent']}; font-size: 11px; font-weight: bold; padding: 0 4px;")
+        self.lbl_filter_count.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        sf_layout.addStretch(2)  # sayaç çubuğun en sağına sabitlenir
         sf_layout.addWidget(self.lbl_filter_count)
 
         right_layout.addWidget(search_filter_bar)
@@ -1005,7 +1139,7 @@ class MainWindow(QMainWindow):
         self._sync_empty_state()
         right_layout.addWidget(self.table_stack)
         splitter.addWidget(right_panel)
-        splitter.setSizes([200, 800])
+        splitter.setSizes([240, 760])
 
         # Status Bar — kalıcılar: toplam hız + hız grafiği + kısa uyarı.
         # Diğer durumlar ⚡ açılır durum panelinde toplanır.
@@ -2276,6 +2410,11 @@ class MainWindow(QMainWindow):
                 if btn.isChecked():
                     active_chip = chip_id
                     break
+        if hasattr(self, "btn_filter_menu"):
+            for chip_id, chip_label in getattr(self, "_filter_chip_defs", []):
+                if chip_id == active_chip:
+                    self.btn_filter_menu.setText(f"🔽 {chip_label} ▾")
+                    break
 
         visible_count = 0
         total_count = self.table.rowCount()
@@ -2402,6 +2541,15 @@ class MainWindow(QMainWindow):
     def _on_pause_all(self):
         self.queue_mgr.pause_queue()
 
+    def _apply_limit_badge_style(self, success: bool):
+        """Hız limiti durum rozeti ('Tam Hız' / aktif limit) için kapsül stil."""
+        color = T['success'] if success else T['color_orange']
+        self.lbl_tb_limit_val.setStyleSheet(
+            f"QLabel {{ font-weight: bold; color: {color}; background-color: {T['bg_panel']};"
+            f" border: 1px solid {color}; border-radius: 10px; padding: 4px 8px;"
+            f" min-width: 52px; min-height: 14px; }}"
+        )
+
     def _init_speed_limiter_controls(self):
         """Sync toolbar speed limiter controls with stored DB settings."""
         speed_en = bool(self.db.get_setting("speed_limit_enabled", False))
@@ -2435,12 +2583,12 @@ class MainWindow(QMainWindow):
             else:
                 txt = f"{kb_val} KB/s"
             self.lbl_tb_limit_val.setText(txt)
-            self.lbl_tb_limit_val.setStyleSheet(f"font-weight: bold; color: {T['color_orange']}; min-width: 75px;")
+            self._apply_limit_badge_style(success=False)
             self.lbl_limiter_stat.setText(f"⚡ Hız Sınırı: Aktif ({txt})")
             self.lbl_limiter_stat.setStyleSheet(f"color: {T['color_orange']}; font-weight: bold; margin-left: 20px;")
         else:
             self.lbl_tb_limit_val.setText("Tam Hız")
-            self.lbl_tb_limit_val.setStyleSheet(f"font-weight: bold; color: {T['success']}; min-width: 75px;")
+            self._apply_limit_badge_style(success=True)
             self.lbl_limiter_stat.setText("⚡ Hız Sınırı: Kapalı (Tam Hız)")
             self.lbl_limiter_stat.setStyleSheet(f"color: {T['success']}; font-weight: bold; margin-left: 20px;")
 
@@ -2708,6 +2856,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'filter_btn_group'):
             for btn in self.filter_btn_group.values():
                 btn.setVisible(not is_simple)
+        if hasattr(self, 'btn_filter_menu') and self.btn_filter_menu is not None:
+            self.btn_filter_menu.setVisible(not is_simple)
         if hasattr(self, 'combo_size_filter') and self.combo_size_filter is not None:
             self.combo_size_filter.setVisible(not is_simple)
         if hasattr(self, 'combo_date_filter') and self.combo_date_filter is not None:
@@ -3114,7 +3264,7 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.ItemDataRole.UserRole, f"queue:{q['id']}")
             self.root_queues.addChild(item)
 
-        item_add = QTreeWidgetItem(["  ➕ Yeni Kuyruk Oluştur..."])
+        item_add = QTreeWidgetItem(["➕ Yeni Kuyruk Oluştur…"])
         item_add.setData(0, Qt.ItemDataRole.UserRole, "__ADD_QUEUE__")
         self.root_queues.addChild(item_add)
 
@@ -3639,6 +3789,7 @@ class MainWindow(QMainWindow):
 
     def _quit_application(self):
         """Cleanly quits the application from tray menu."""
+        self._save_geometry()
         try:
             self.queue_manager.flush_progress()
         except Exception:
@@ -3653,6 +3804,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().quit()
 
     def closeEvent(self, event):
+        self._save_geometry()
         # Check setting: minimize to tray or quit
         close_to_tray = bool(self.db.get_setting("close_to_tray", True))
         if close_to_tray:

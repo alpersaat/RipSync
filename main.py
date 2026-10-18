@@ -23,7 +23,16 @@ def main():
         # Enable high DPI scaling
         app = QApplication(sys.argv)
         app.setApplicationName("RipSync")
-        app.setApplicationDisplayName("RipSync - Download Manager")
+        app.setOrganizationName("RipSync")  # QSettings için varsayılan organizasyon
+        # Qt, pencere başlığına uygulama görünen adını ekler; aynı metin seçilerek
+        # başlığın "RipSync - Internet Download Manager - RipSync - Download Manager"
+        # şeklinde ikilenmesi engellenir.
+        app.setApplicationDisplayName("RipSync - Internet Download Manager")
+        # Temel yazı tipi boyutu: 13px taban (okunabilirlik).
+        # Yüksek DPI ölçeklemesini Qt6 kendi yönetir; ayrıca rounding politikası gerekmez.
+        base_font = app.font()
+        base_font.setPixelSize(13)
+        app.setFont(base_font)
         app.setQuitOnLastWindowClosed(False)  # Keep running in system tray
         from ui.tray_icon import create_default_icon
         app.setWindowIcon(create_default_icon())

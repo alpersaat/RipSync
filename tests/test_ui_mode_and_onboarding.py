@@ -78,9 +78,11 @@ def test_main_window_simple_and_advanced_mode(qapp, test_db, queue_mgr):
     assert win.root_tags.isHidden() is True
     assert win.root_queues.isHidden() is True
 
-    # Arama çubuğunda chip ve combo filtreler gizli olmalı
-    for btn in win.filter_btn_group.values():
-        assert btn.isHidden() is True
+    # Arama çubuğunda filtre menüsü ve combo filtreler gizli olmalı
+    # (çipler artık QMenu içinde QAction olarak barınıyor)
+    assert win.btn_filter_menu.isHidden() is True
+    for act in win.filter_btn_group.values():
+        assert act.isVisible() is False
     assert win.combo_size_filter.isHidden() is True
     assert win.combo_date_filter.isHidden() is True
     assert win.lbl_filter_count.isHidden() is True
@@ -109,8 +111,9 @@ def test_main_window_simple_and_advanced_mode(qapp, test_db, queue_mgr):
     assert win.root_queues.isHidden() is False
 
     # Arama çubuğunda filtreler görünür olmalı
-    for btn in win.filter_btn_group.values():
-        assert btn.isHidden() is False
+    assert win.btn_filter_menu.isHidden() is False
+    for act in win.filter_btn_group.values():
+        assert act.isVisible() is True
     assert win.combo_size_filter.isHidden() is False
     assert win.combo_date_filter.isHidden() is False
     assert win.lbl_filter_count.isHidden() is False
